@@ -15,7 +15,11 @@ Position (2026-11-11):
   7.17, brain 158; src debt 6950, health 7.04. diff HEAD~50..HEAD: debt over touched
   files 1418.5 -> 2014.8, 6 failures. Scan 17 s, diff 5.5 s.
 
-Next action: `gate` (behaviour gate: base-regenerated references, determinism check,
+OpenFlowsheet adopter findings: docs/adopters/openflowsheet.md (F0 identity gate 40 s,
+35 frozen modules, tiered gate proposal). Calibration: docs/CALIBRATION.md (rho 0.87, src 0.90).
+Open with user: coverage/xdist in OpenFlowsheet dev deps; first scope application/.
+
+Next action: `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
 bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills
 (setup, refactor-loop, healthy-coding) + reusable workflow. User: run CodeScene on
 OpenFlowsheet (needed for python@1 calibration and demo).
