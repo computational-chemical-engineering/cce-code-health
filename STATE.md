@@ -6,14 +6,18 @@ importable into any repo. Public repo-to-be: computational-chemical-engineering/
 (free Community Edition, public repo), loop itself optimises open-source metrics.
 
 Position (2026-11-11):
-- docs/DESIGN.md is draft 1 (after think review). baseline.py is the prototype; its capped score is now display-only, debt to be added.
-- baseline.py: open-source proxy health (lizard CCN/NLOC/params, complexipy cognitive,
-  AST nesting + bumpy road, 8-line window duplication, git churn). Thresholds and
-  penalties at top of file. Proxy, NOT CodeScene's metric.
-- Baseline OpenFlowsheet@a9e733e4 in baselines/openflowsheet-a9e733e4/summary.md:
-  all 7.16, src 6.93 (NLOC-weighted); src 277 files, 10 below 4, 77 at 10.
-- Venv: .venv (lizard 1.17+, radon, complexipy). Run: .venv/bin/python baseline.py REPO OUT
+- Public repo https://github.com/computational-chemical-engineering/cce-code-health (main).
+- Package v0.1.0 (src/cce_code_health): CLI `codehealth scan|diff|hotspots`, debt metric
+  profile python@0, base-vs-head ratchet with base config, rename-following hotspots,
+  inline suppressions. 13 tests (tests/). docs/DESIGN.md is draft 1 (after think review).
+- baseline.py = superseded prototype (capped score); baselines/openflowsheet-a9e733e4 kept.
+- OpenFlowsheet@a9e733e4 scan: 1191 files, 422.5k NLOC, debt 26594 (62.9/kNLOC), health
+  7.17, brain 158; src debt 6950, health 7.04. diff HEAD~50..HEAD: debt over touched
+  files 1418.5 -> 2014.8, 6 failures. Scan 17 s, diff 5.5 s.
 
-Next action: user decides on creating public GitHub repo and pushing; user runs CodeScene on OpenFlowsheet. Then build `codehealth` package (Python backend, debt metric, diff base-vs-head) per docs/DESIGN.md draft 1.
+Next action: `gate` (behaviour gate: base-regenerated references, determinism check,
+bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills
+(setup, refactor-loop, healthy-coding) + reusable workflow. User: run CodeScene on
+OpenFlowsheet (needed for python@1 calibration and demo).
 
 Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeScene CLI access.

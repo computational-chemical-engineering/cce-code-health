@@ -52,7 +52,9 @@ No committed baseline file.
 
 Per function, uncapped, weighted sum of excess over thresholds:
 `(cognitive − 15)+`, `(nloc − 70)+`, `(nesting − 3)+`, `(bumps − 2)+`, `(params − 5)+`,
-with `*args`/`**kwargs` counted as +3 parameters. To add: complex conditionals and
+with `*args`/`**kwargs` counted as +3 parameters. Nesting counts if/loops/try/match,
+not `with` (as cognitive complexity). Weights in profile `python@0` (uncalibrated):
+cognitive 1, nloc 0.1, nesting 3, bumps 2, params 1, boolops 1. To add: complex conditionals and
 low cohesion (CodeScene smells; thresholds to be calibrated). File-level smells:
 NLOC > 1000 / 2000, duplicated-line fraction > 10 %.
 Debt does not depend on file boundaries, so splitting files or bundling parameters

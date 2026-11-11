@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cce-code-health"
+version = "0.1.0"
+description = "Code-health metrics, CI ratchet and tooling for a behaviour-preserving agentic refactor loop (experimental)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["complexipy>=8"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+codehealth = "cce_code_health.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

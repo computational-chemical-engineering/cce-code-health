@@ -16,3 +16,39 @@ Inspired by Adam Tornhill's work on code health and hotspots. The scores here ar
 open-source proxy, not CodeScene's Code Health metric.
 
 See [docs/DESIGN.md](docs/DESIGN.md). License: MIT.
+
+## Usage (0.1)
+
+```bash
+pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.1.0
+codehealth scan                      # score in-scope files in the working tree
+codehealth diff --base origin/main   # ratchet: fail (exit 1) if the change adds debt
+codehealth hotspots --top 20         # rank files by commits x debt (follows renames)
+```
+
+Every command prints a one-line summary and can write the full report with `--json FILE`.
+Exit codes: 0 pass, 1 regression, 2 tool error.
+
+**Debt** is the quantity that is gated: per function, the weighted excess over thresholds
+for cognitive complexity, lines of code, nesting, bumpy road, parameters and boolean
+operators per condition (profile `python@0`, see `src/cce_code_health/profiles.py`).
+The 1..10 **health** value is for display only.
+
+`diff` compares the merge-base of `--base` and head (default: working tree) and uses the
+base's `.codehealth/config.toml`. It fails if debt over the touched files rises, a file
+smell (large file, duplication) appears, or a new brain function appears.
+
+Optional `.codehealth/config.toml`:
+
+```toml
+schema = 1
+profile = "python@0"
+[scope]
+include = ["src/*"]        # fnmatch; '*' also matches '/'
+exclude = ["src/pkg/_generated/*"]
+```
+
+Suppress a smell for one function with a comment on the line above it or on its `def`
+line; the reason is mandatory and every new suppression is listed by `diff`:
+`# codehealth: allow params -- public API, kept for compatibility`.
+File-level smells use `allow-file`.
