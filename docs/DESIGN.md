@@ -1,105 +1,160 @@
-# cce-code-health: design (draft 0, for review)
+# cce-code-health: design (draft 1)
+
+Draft 0 was reviewed on 2026-11-11 (think agent, Opus); its recommendations are folded in
+here. Decisions are recorded in docs/DECISIONS.md.
 
 ## Goal
 
 Raise and then keep the code health of a repository high, without changing its
-behaviour. Three uses: a one-off refactor campaign (the loop), continuous standards for
-ordinary coding agents (the playbook plus hooks), and a CI gate (the ratchet).
+behaviour. Three uses: a refactor campaign (the loop), standards for ordinary coding
+agents (playbook rules plus an after-edit hook), and a CI gate (no new debt).
 Languages: Python first, C++ second (Peclet suite).
 
 ## Two places
 
 ### Central repo (this one)
 
-1. **Python package, CLI `codehealth`**, installable with
-   `pip install git+https://github.com/computational-chemical-engineering/cce-code-health`.
+1. **Python package, CLI `codehealth`** (check the PyPI name before first release).
+   Installed pinned to a tag, never from `main`; the reusable workflow pins the same tag.
    Language backends produce one common report format.
-   - `scan`: score every file in scope, write a report.
-   - `diff --base <ref>`: score files changed against a base; exit non-zero if any
-     touched file's score drops below its baseline value, or a new or changed function
-     crosses a hard threshold.
-   - `hotspots`: rank files by change frequency × (10 − health).
-   - `gate`: run the repo's behaviour gate (see below) and report pass/fail.
-   - `baseline update`: rewrite `.codehealth/baseline.json` (only ever upward per file,
-     unless forced with a recorded reason).
+   - `scan`: score every file in scope.
+   - `diff --base <ref>`: compare merge-base and head (see Ratchet).
+   - `hotspots`: rank files by change frequency × debt, following renames.
+   - `gate`: run the behaviour gate for a base/head pair.
+   - `playbook stats`: compute recipe evidence from run logs.
+   Exit codes: 0 pass, 1 regression, 2 tool error.
 2. **Claude Code plugin** (marketplace in this repo, as pymrm does):
-   - skill `setup`: inspects a repo, writes `.codehealth/config.toml`, detects the test
-     command, proposes reference cases, adds CI workflow, pre-commit hook, first
-     baseline, and a short CLAUDE.md snippet.
-   - skill `refactor-loop`: the campaign (below).
-   - skill `healthy-coding`: thresholds and how to use the repo playbook while coding.
-   - hook: after edits, run `codehealth diff` on touched files and report regressions.
-   - seed playbook: general patterns per language, copied into a repo at setup.
+   - skill `setup`: writes `.codehealth/config.toml`, detects test commands, proposes
+     reference cases, adds CI workflow and pre-commit hook, adds a two-line CLAUDE.md
+     pointer to the `healthy-coding` skill.
+   - skill `refactor-loop`: the campaign.
+   - skill `healthy-coding`: the rules for new code (seed rules + repo rules).
+   - hook: after edits, run a fast `codehealth diff` on touched files.
+   - **seed playbook, shipped and versioned inside the plugin, never copied** into repos.
    The plugin provides skills and tools, not a competing agent set: repos with their own
    agent lanes (OpenFlowsheet) keep them.
-3. **Reusable GitHub Actions workflow** calling `codehealth diff` and `codehealth gate`.
+3. **Reusable GitHub Actions workflow** calling `codehealth diff` (and optionally `gate`).
 
 ### Per repo: `.codehealth/` (committed)
 
 ```
-config.toml    scope, exclusions, thresholds overrides, language backends,
-               gate: build cmd, fast test cmd, full test cmd, reference cases
-baseline.json  per-file scores at the last accepted state (the ratchet)
-playbook.md    repo playbook: patterns with evidence (applied n, reverted m, example commit)
-log.jsonl      append-only: one record per loop attempt (target, pattern, result, reason)
+config.toml           schema = 1; metric profile (e.g. python@1); scope, exclusions;
+                      gate: build cmd, fast/full test cmds, environment pins,
+                      reference cases
+playbook.md           local rules and recipes only, plus `disable: <seed-id>` lines
+runs/<campaign>.jsonl one file per campaign (no shared append-only file: no conflicts)
 ```
+No committed baseline file.
 
-## Measurement (proxy health 1..10 per file)
+## Metric
 
-Function-level smells: cognitive complexity > 15 (complex) and > 40 with NLOC > 70
-(brain), NLOC > 70 (long), nesting ≥ 4, bumpy road (≥ 3 nested blocks), ≥ 6 parameters.
-File-level: NLOC > 1000 / > 2000, duplicated-line fraction > 10 %. Penalties per smell
-with caps per category; score = max(1, 10 − penalties). Project score: NLOC-weighted
-mean. Python: lizard, complexipy, AST. C++: lizard, clang-tidy
-(`readability-function-cognitive-complexity`, `readability-function-size`).
-Duplication: token windows, language-independent.
-Prototype: `baseline.py`; first run in `baselines/openflowsheet-a9e733e4/summary.md`.
+### Debt (the quantity that is gated and optimised)
+
+Per function, uncapped, weighted sum of excess over thresholds:
+`(cognitive − 15)+`, `(nloc − 70)+`, `(nesting − 3)+`, `(bumps − 2)+`, `(params − 5)+`,
+with `*args`/`**kwargs` counted as +3 parameters. To add: complex conditionals and
+low cohesion (CodeScene smells; thresholds to be calibrated). File-level smells:
+NLOC > 1000 / 2000, duplicated-line fraction > 10 %.
+Debt does not depend on file boundaries, so splitting files or bundling parameters
+cannot reduce it without improving functions.
+
+### Health score (display only)
+
+The 1..10 per-file score (prototype `baseline.py`) is for reports and comparison with
+CodeScene, not for decisions.
+
+### Calibration and versioning
+
+Calibrate weights against CodeScene on files the demo will not touch (OpenFlowsheet
+scripts and tests, pymrm): rank correlation, non-negative weight fit, target ≥ 0.7.
+Freeze as a named profile (`python@1`, later `cpp@1`). A repo opts into a profile;
+changing profiles is an explicit config change.
+
+### Backends
+
+Python: lizard, complexipy, AST. C++: lizard for now; tree-sitter preferred for both the
+hook and CI (clang-tidy needs compile_commands.json and is too slow for the hook;
+open question). Duplication: token windows, language-independent.
+Function identity key: `path::Class.method` (C++: plus signature).
+
+## Ratchet (CI and hook)
+
+`diff` scores merge-base and head with the same tool version and the **base's**
+config.toml (a PR cannot loosen its own thresholds). It fails if:
+1. total function debt over the touched files rises (base paths and head paths
+   together, with rename detection);
+2. a file-level smell newly appears;
+3. a new function exceeds the brain level.
+New files, renames, moves and splits need no extra rules; concurrent branches never
+conflict; a metric upgrade does not break consumers.
+
+Exceptions: inline only, `# codehealth: allow <smell> -- <reason>` (reason mandatory),
+listed in every PR report. The loop may never add one.
 
 ## Behaviour gate
 
-A refactor step is accepted only if:
-1. build succeeds (C++);
-2. fast tests pass (per-step), full tests pass (end of campaign, and before PR);
-3. reference cases reproduce stored outputs **bit-identically**;
-4. the target code was covered by tests before the step. If not, the loop first writes
-   characterisation tests that pin current behaviour, commits them separately, and only
-   then refactors.
+A refactor step is accepted only if all hold:
+1. **References from base, not committed goldens.** Reference cases are run at the
+   base commit in the same environment during the campaign, and compared with head.
+2. **Determinism first.** A case counts only if two base runs agree bitwise under
+   pinned environment (PYTHONHASHSEED=0, BLAS/OMP threads = 1, fixed MPI ranks).
+3. **Full-precision byte comparison**, never printed text. Comparator per case:
+   `bitwise` (default) or `ulp:n` (only when declared by a human, with a reason).
+4. **Commit separation.** Refactor commits touch neither tests, reference definitions
+   nor `.codehealth/`. Characterisation tests go in a separate commit that passes at
+   base.
+5. **Coverage strength.** Target must have branch coverage, and 2 to 3 mutants injected
+   into the target must be caught by tests or references. Otherwise write
+   characterisation tests first (rule 4).
+6. **Public API** (pymrm, peclet-core): snapshot of public signatures unchanged.
+7. Fast tests per step; full tests at end of campaign and before PR.
 
-C++ floating point: semantically neutral refactors can change bits (FMA contraction,
-inlining, vectorisation). Proposal: gate builds use `-ffp-contract=off`, no fast-math;
-a per-output tolerance is allowed only when declared in config with a reason.
+C++: strict gate build with `-ffp-contract=off`, no `-Ofast`/`-ffast-math`/
+`-fassociative-math`, same compiler at base and head; bitwise required there. Also build
+with production flags and report max ULP difference (FMA contraction, e.g. under
+`-march=native`, can change bits when code is extracted). If a project already builds
+with contraction off, the second build is unnecessary.
+
+Reference case definition format: command, output files, comparator.
 
 ## Refactor loop (one iteration)
 
-1. pick target: highest hotspot rank in scope, not recently failed;
-2. coverage check (gate rule 4);
-3. read playbook, choose a pattern, make one small step;
-4. gate; measure target file;
-5. accept (commit) if gate passes and health improved without regressing other files;
-   else revert;
-6. append to `log.jsonl`.
-Every N iterations: consolidate the log into `playbook.md` (patterns with counts and an
-example commit; prune patterns that keep failing). Anti-gaming: reject steps that improve
-the score by fragmenting code without improving readability (review criterion in the
-skill, and CodeScene as external judge).
-Campaign runs on its own branch in a worktree and ends in a PR.
+1. pick target: highest churn × debt in scope, not recently failed;
+2. coverage strength check (gate rule 5);
+3. read playbook, choose a recipe, make one small step (cap on code growth per step);
+4. gate; compute debt;
+5. accept (commit) if gate passes and debt decreased, no other file regressed, and a
+   fresh-context reviewer (sees only the diff) judges readability improved;
+   else revert, recording the reason: `gate-fail`, `no-gain` or `review-reject`;
+6. append a record to `runs/<campaign>.jsonl`.
+Loop may not edit config, suppressions or tests (tests only via rule 4 commits).
+Campaign runs on its own branch in a worktree and ends in a PR, merged **without squash**
+(recipe evidence links to commits).
 
-## Playbook flow
+Every log record carries: model, tool version, metric profile, base and head SHA,
+target key, recipe id, debt before/after, result, reason.
 
-Seed (central) → copied at setup → grows per repo through the loop → general lessons
-promoted back to the central seed by a manual PR only.
+## Playbook
+
+Two sections:
+- **Rules for new code**: at most 10 bullets. The only part ordinary agents read.
+- **Refactor recipes**: loop only. Each: stable id, smell targeted, when to use, when not
+  to use, a 3 to 6 line recipe, one evidence line.
+
+Evidence is computed by `codehealth playbook stats` from run logs, never counted by an
+LLM. Promote a candidate at ≥ 3 accepts across ≥ 2 files. Retire below 40 % acceptance
+after 5 tries, or after any `gate-fail` without a written "when not". Size cap about
+15 recipes and 120 lines.
+Flow: seed (in plugin, versioned) + local recipes (repo) → general lessons proposed to
+the seed by a manual PR only.
 
 ## Demo
 
-OpenFlowsheet, scope `src/`: CodeScene Community score before; run campaign; CodeScene
-delta on the PR plus proxy before/after; all tests and reference cases unchanged.
+OpenFlowsheet, scope `src/`: CodeScene Community score before; campaign; CodeScene delta
+on the PR plus proxy and debt before/after; all tests and reference cases bit-identical.
 
-## Open questions (for review)
+## Open questions
 
-1. Is the `.codehealth/` layout and the ratchet rule (per-file, never down) right, and how
-   are new files, renames, and deliberate exceptions handled?
-2. Gate rules, especially bit-identical vs tolerance, and the C++ floating-point policy.
-3. Proxy score: are the smells, thresholds and penalties sensible; how to calibrate
-   against CodeScene; how to keep the score from being gamed.
-4. Playbook format and consolidation rule so it stays short and evidence-based.
-5. Anything missing that will be expensive to change once several repos depend on it.
+1. C++ backend: tree-sitter vs lizard + clang-tidy.
+2. Exact CodeScene thresholds for complex conditional and low cohesion (calibration).
+3. Peclet build flags: is FMA contraction already off?
