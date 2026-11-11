@@ -1,8 +1,8 @@
-# code-health-lab: state
+# cce-code-health: state
 
 Objective: build an agentic refactor loop (agent + skills + measurement tools) that raises
 code health of a Python repo to ~10 without changing behaviour, building its own playbook;
-importable into any repo. Demo target: OpenFlowsheet, judged before/after by CodeScene
+importable into any repo. Public repo-to-be: computational-chemical-engineering/cce-code-health (MIT, 0.x experimental). Design: docs/DESIGN.md; decisions: docs/DECISIONS.md. Demo target: OpenFlowsheet, judged before/after by CodeScene
 (free Community Edition, public repo), loop itself optimises open-source metrics.
 
 Position (2026-11-11):
@@ -13,7 +13,6 @@ Position (2026-11-11):
   all 7.16, src 6.93 (NLOC-weighted); src 277 files, 10 below 4, 77 at 10.
 - Venv: .venv (lizard 1.17+, radon, complexipy). Run: .venv/bin/python baseline.py REPO OUT
 
-Next action: user signs up OpenFlowsheet at codescene.io and reports score + hotspots;
-compare with proxy; then design the loop (behaviour gate: tests + bit-identical golden outputs).
+Next action: think review of docs/DESIGN.md; user to create/approve public GitHub repo and push; user runs CodeScene on OpenFlowsheet. Then restructure baseline.py into package + CLI (Python backend), then plugin skills.
 
 Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeScene CLI access.
