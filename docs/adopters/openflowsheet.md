@@ -43,7 +43,7 @@ campaign as an OpenFlowsheet work package (e.g. `wp/CH1`).
 
 ## Plan from OpenFlowsheet-TR09 (2026-11-11), to start after the budget reset 2026-11-12 13:00
 
-Approved by Frank as work package **S16** (branch wp/S16; CH1 did not fit the ID pattern). Tested manifest incl. recall check, one bounded reviewer pass. First refactor scope not yet confirmed.
+Approved by Frank as work package **S16** (branch wp/S16; CH1 did not fit the ID pattern). Tested manifest incl. recall check, one bounded reviewer pass. First refactor scope confirmed by Frank (2026-11-11): src/openflowsheet/application/; M9 frozen modules and hashed texts (bindings/descriptions, schemas, catalogue YAML) excluded; every step keeps F0 --check and the served MCP digest unchanged. Campaign starts after S16 select is merged.
 1. coverage, pytest-cov, pytest-xdist in a separate hash-pinned `requirements-testmap.lock`
    (requirements.lock and pyproject.toml are identity-bound, D2.4 / R-140). Nothing in src/.
 2. `scripts/test_impact.py build`: default-marker suite once at a base commit, coverage
