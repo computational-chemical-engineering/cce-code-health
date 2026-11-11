@@ -40,3 +40,31 @@ Open for the owner: add `coverage` (and possibly `pytest-xdist`) to dev dependen
 (`requirements.lock`); first scope `src/openflowsheet/application/` (hotspots local.py,
 revision_run.py, revision_binding.py, coupled_run.py; CodeScene 3.97 to 4.12); the
 campaign as an OpenFlowsheet work package (e.g. `wp/CH1`).
+
+## Plan from OpenFlowsheet-TR09 (2026-11-11), to start after the budget reset 2026-11-12 13:00
+
+Proposed as work package `wp/CH1` (ID and scope: Frank decides).
+1. coverage, pytest-cov, pytest-xdist in a separate hash-pinned `requirements-testmap.lock`
+   (requirements.lock and pyproject.toml are identity-bound, D2.4 / R-140). Nothing in src/.
+2. `scripts/test_impact.py build`: default-marker suite once at a base commit, coverage
+   dynamic contexts per test node, subprocesses via COVERAGE_PROCESS_START + sitecustomize
+   on PYTHONPATH for this run only. Map (file, line) -> node ids, keyed by base commit + tree.
+3. Non-Python inputs (catalogue YAML, schemas, MCP description .md, benchmark data,
+   fixtures): recorded per test with an audit hook on "open"; a non-.py change maps to the
+   tests that opened the file.
+4. `scripts/test_impact.py select --base <sha>`: node ids for base..worktree; full-suite
+   fallback (with reason) on conftest / *_support.py / plugin change, new or deleted file,
+   base not an ancestor, stale map.
+5. Verified by recall on historical failing commits and a seeded-mutation spot check.
+
+Constraints: selection is inner-loop only; merge condition stays CI green on both
+architectures + F0 after merge (recorded as an OpenFlowsheet decision). xdist opt-in and
+only after a measured identical run. Refactor exclusions: the 35 M9 modules plus anything
+hashed into identity or a surface digest (bindings/descriptions, schemas, catalogue texts,
+R0 counters). application/ local.py, revision_run.py, coupled_run.py are on the agent
+surface chain (c_0..c_9): per-step check must include the served MCP digest besides F0.
+
+Integration with cce-code-health: the per-step tier-1 command in `.codehealth/config.toml`
+is OpenFlowsheet's `scripts/test_impact.py select`; tier-2 commands are F0 `--check` and
+the served-digest check. After CH1 lands, send the per-step gate to OpenFlowsheet-TR09
+for a check against the repo's rules.

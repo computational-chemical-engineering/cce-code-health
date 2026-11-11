@@ -17,7 +17,7 @@ Position (2026-11-11):
 
 OpenFlowsheet adopter findings: docs/adopters/openflowsheet.md (F0 identity gate 40 s,
 35 frozen modules, tiered gate proposal). Calibration: docs/CALIBRATION.md (rho 0.87, src 0.90).
-Coverage/xdist in OpenFlowsheet: user wants it; handed to session OpenFlowsheet-TR09 (2026-11-11), awaiting its plan. Hub informed of this project. Open with user: first scope application/.
+Coverage/xdist in OpenFlowsheet: user wants it; OpenFlowsheet-TR09 plan received (wp/CH1, starts after budget reset 2026-11-12 13:00; see adopter notes). Hub informed of this project. Open with user: first scope application/.
 
 Next action: `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
 bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills
