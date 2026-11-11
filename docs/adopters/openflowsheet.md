@@ -43,7 +43,7 @@ campaign as an OpenFlowsheet work package (e.g. `wp/CH1`).
 
 ## Plan from OpenFlowsheet-TR09 (2026-11-11), to start after the budget reset 2026-11-12 13:00
 
-Proposed as work package `wp/CH1` (ID and scope: Frank decides).
+Approved by Frank as work package **S16** (branch wp/S16; CH1 did not fit the ID pattern). Tested manifest incl. recall check, one bounded reviewer pass. First refactor scope not yet confirmed.
 1. coverage, pytest-cov, pytest-xdist in a separate hash-pinned `requirements-testmap.lock`
    (requirements.lock and pyproject.toml are identity-bound, D2.4 / R-140). Nothing in src/.
 2. `scripts/test_impact.py build`: default-marker suite once at a base commit, coverage
@@ -66,5 +66,5 @@ surface chain (c_0..c_9): per-step check must include the served MCP digest besi
 
 Integration with cce-code-health: the per-step tier-1 command in `.codehealth/config.toml`
 is OpenFlowsheet's `scripts/test_impact.py select`; tier-2 commands are F0 `--check` and
-the served-digest check. After CH1 lands, send the per-step gate to OpenFlowsheet-TR09
+the served-digest check. After S16 lands, send the per-step gate to OpenFlowsheet-TR09
 for a check against the repo's rules.
