@@ -68,3 +68,14 @@ Integration with cce-code-health: the per-step tier-1 command in `.codehealth/co
 is OpenFlowsheet's `scripts/test_impact.py select`; tier-2 commands are F0 `--check` and
 the served-digest check. After S16 lands, send the per-step gate to OpenFlowsheet-TR09
 for a check against the repo's rules.
+
+## Gate trial 2026-11-12 (codehealth gate, trial config override, worktree at a9e733e4)
+
+1. No-op refactor in `application/local.py::_context` (introduce a local variable):
+   PASS 6/6 (frozen, forbid, literals, public_api, ruff, F0 40.7 s).
+2. Real behaviour change in the same function (`owner_instance=None`): ruff caught the
+   formatting first; after formatting, **PASS 6/6: F0 does not exercise this path.**
+   Tests that reference `owner_instance` exist (tests/test_t07_adr0008_jobs_http.py,
+   t07_transport_support.py, t07_store_support.py). Conclusion: F0 is necessary but not a
+   behaviour gate for application/; the per-step impacted-test tier (S16) is required, and
+   the mutant check must use tests + F0 together.

@@ -19,7 +19,10 @@ OpenFlowsheet adopter findings: docs/adopters/openflowsheet.md (F0 identity gate
 35 frozen modules, tiered gate proposal). Calibration: docs/CALIBRATION.md (rho 0.87, src 0.90).
 Coverage/xdist in OpenFlowsheet: user wants it; OpenFlowsheet-TR09 plan received approved as wp/S16, starts after budget reset 2026-11-12 13:00; see adopter notes. Hub informed of this project. First scope confirmed: application/ (campaign after S16 merge).
 
-Next action: `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
+codehealth gate built (static rules, command and reference tiers, cadence, trial --config); OpenFlowsheet trial: F0 misses an application/ behaviour change, so impacted tests (S16) are required.
+Open design question (user, 2026-11-12): performance-motivated changes that alter round-off (Peclet, pymrm): tolerance comparators + perf tier, separate commit class.
+
+Next action (old): `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
 bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills
 (setup, refactor-loop, healthy-coding) + reusable workflow. User: run CodeScene on
 OpenFlowsheet (needed for python@1 calibration and demo).

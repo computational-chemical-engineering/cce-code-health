@@ -23,6 +23,7 @@ class Config:
     include: list = field(default_factory=lambda: ["*"])
     exclude: list = field(default_factory=list)
     source: str = "default"
+    gate: dict = field(default_factory=dict)   # raw [gate] table, interpreted by gate.py
 
     def in_scope(self, path: str) -> bool:
         return (Path(path).suffix in EXTENSIONS
@@ -37,7 +38,8 @@ def parse(text: str, source: str) -> Config:
     scope = data.get("scope", {})
     return Config(profile=profiles.get(data.get("profile", "python@0")),
                   include=list(scope.get("include", ["*"])),
-                  exclude=list(scope.get("exclude", [])), source=source)
+                  exclude=list(scope.get("exclude", [])), source=source,
+                  gate=dict(data.get("gate", {})))
 
 
 def load(repo: Path, ref: str | None) -> Config:

@@ -6,7 +6,10 @@ import json
 import sys
 from pathlib import Path
 
+import tempfile
+
 from . import __version__, config, gitio
+from . import gate as gatemod
 from .duplication import duplicated_lines
 from .python_backend import analyze
 from .report import file_report
@@ -139,28 +142,51 @@ def cmd_hotspots(a) -> int:
     return 0
 
 
+def cmd_gate(a) -> int:
+    repo = Path(a.repo).resolve()
+    log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
+    checks, base = gatemod.gate(repo, a.base, a.cadence, log,
+                                 Path(a.config).resolve() if a.config else None)
+    write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
+                                 "head": "worktree", "cadence": a.cadence, "log": str(log)},
+                        "checks": [c.__dict__ for c in checks]})
+    for c in checks:
+        print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
+    failed = [c.name for c in checks if not c.ok]
+    print(f"GATE {'FAIL' if failed else 'PASS'} {repo.name} base={base[:10]} head=worktree "
+          f"cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
+          + (f", failed: {', '.join(failed)}" if failed else "")
+          + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="codehealth", description=__doc__)
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn, help_ in (("scan", cmd_scan, "score every in-scope file"),
                             ("diff", cmd_diff, "ratchet: compare merge-base and head"),
-                            ("hotspots", cmd_hotspots, "rank files by commits x debt")):
+                            ("hotspots", cmd_hotspots, "rank files by commits x debt"),
+                            ("gate", cmd_gate, "behaviour gate: static rules and tiers, base vs worktree")):
         p = sub.add_parser(name, help=help_)
         p.set_defaults(fn=fn)
         p.add_argument("--repo", default=".")
         p.add_argument("--json", help="write the full report to this file")
-        if name != "diff":
+        if name in ("scan", "hotspots"):
             p.add_argument("--top", type=int, default=20)
     sub.choices["scan"].add_argument("--ref", help="commit to scan (default: working tree)")
     sub.choices["diff"].add_argument("--base", default="HEAD",
                                      help="base ref; its merge-base with head is used (default HEAD)")
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")
     sub.choices["hotspots"].add_argument("--since", help="only count commits since this date")
+    sub.choices["gate"].add_argument("--base", default="HEAD", help="base ref (merge-base is used)")
+    sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
+    sub.choices["gate"].add_argument("--log", help="full log of tier commands")
+    sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")
     a = ap.parse_args(argv)
     try:
         return a.fn(a)
-    except (gitio.GitError, ValueError, OSError) as exc:
+    except (gitio.GitError, ValueError, OSError, RuntimeError, KeyError) as exc:
         print(f"codehealth: error: {exc}", file=sys.stderr)
         return 2
 
