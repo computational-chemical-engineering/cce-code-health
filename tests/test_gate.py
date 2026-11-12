@@ -29,6 +29,7 @@ outputs = ["r.txt"]
 [[gate.tier]]
 name = "slow"
 cadence = "campaign"
+behaviour = false
 cmd = "exit 3"
 """
 MOD = '''

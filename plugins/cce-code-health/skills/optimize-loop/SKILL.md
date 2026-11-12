@@ -19,7 +19,8 @@ refactor commit gated in refactor mode, then optimise.
 
 1. `codehealth --version` works (installed from the pinned tag in the repo's docs/CI).
 2. `.codehealth/config.toml` at the base commit has:
-   - at least one `kind = "reference"` tier with a `tolerance = {rel, abs, ulp}`;
+   - at least one `kind = "reference"` tier with a `tolerance = {rel, abs, ulp}`, preferably
+     with `coverage = true` (Python) so untested changes cannot pass;
    - exactly one `kind = "benchmark"` tier with `primary = true` and `min_speedup`
      (other benchmark tiers only guard against slowdown);
    - `[gate.env]` pins for determinism: OMP_NUM_THREADS, OPENBLAS_NUM_THREADS and
@@ -58,13 +59,16 @@ refactor commit gated in refactor mode, then optimise.
    well-named functions rather than inlining everything into a larger function; no
    copy-pasted special cases. Do not touch tests, benchmarks, reference cases, config,
    frozen files, string literals or public signatures.
-4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit>`.
-   It checks static rules, debt (may not rise), every reference within tolerance, and the
-   benchmark speedup >= `min_speedup`.
-5. **Noise discipline** (interim rule until a confidence-interval criterion is decided):
-   the gate reports the median and the min/max of the paired ratios base_i/head_i. If the
-   minimum paired ratio is below `min_speedup` while the median passes, rerun the gate
-   with `repeat` doubled; accept only if both runs pass. Never accept on a single lucky run.
+4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit> --ref-base <campaign base>`.
+   Static rules and debt are checked against the last accepted commit; references and
+   benchmarks against the campaign base, so tolerance and speed form one budget for the
+   whole campaign. References must stay within tolerance (head run twice, deterministic);
+   with `coverage = true` they must execute every changed function; the primary benchmark
+   passes when the lower 95 % confidence bound of the paired ratios reaches `min_speedup`
+   (the gate adds rounds itself when the median passes and the bound does not).
+5. **Read the report**: the `numeric-literals` check lists every changed numeric constant.
+   A changed tolerance, iteration limit, step size or grid size is doing less work, not
+   optimising: revert it unless the human asked for exactly that.
 6. **Accept or revert.**
    - Accept: commit with message `perf(<area>): <what>` and trailers
      `Codehealth-Class: optimize`, `Codehealth-Recipe: <id>`,

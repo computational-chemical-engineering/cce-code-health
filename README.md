@@ -59,6 +59,8 @@ File-level smells use `allow-file`.
 codehealth gate --base main                    # refactor mode: bitwise references, no slowdown
 codehealth gate --base main --mode optimize    # declared tolerance, required speedup
 codehealth gate --base main --cadence campaign # also the slow tiers
+codehealth gate --base step-n --ref-base campaign-start --mode optimize  # tiers vs campaign base
+codehealth config --check                      # validate .codehealth/config.toml
 ```
 
 Static rules (frozen files, forbidden paths with `.codehealth/*` always forbidden, every
@@ -75,6 +77,17 @@ benchmark tier may not slow down beyond `max_slowdown` (default 0.03).
 
 Empty gates fail: an empty diff at cadence step, optimize mode without a reference tier or
 a primary benchmark with `min_speedup`, refactor mode without a reference or command tier.
+`--ref-base <ref>` (default: same as `--base`) is the campaign base: reference and benchmark
+tiers compare head with it, so tolerances and slowdowns cannot compound over steps, while static
+checks and debt keep using `--base`. Reference outputs of the ref-base are cached under
+`<git-common-dir>/codehealth/cache/<sha>/<tier>/`; head reference runs twice and must be
+deterministic. A reference tier with `coverage = true` must execute every changed function
+(coverage.py, installed in the command's interpreter). In optimize mode the primary benchmark is
+accepted when the 95 % distribution-free lower bound of the median paired speedup reaches
+`min_speedup`; if only the median does, ABBA rounds are added up to `max_repeat` (default
+4 x `repeat`). An informational `numeric-literals` check lists numeric constants removed or
+added. `[gate] prefix` prepends a shell prefix to every tier command; `{gitdir}` and `{repo}`
+work in `prefix` and `[gate.env]`.
 With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3. The base worktree
 lives under `<git-common-dir>/codehealth/`.
 
@@ -84,7 +97,8 @@ codehealth gate --self-test --mutate src/a.py:42 # ... or the literal on this li
 ```
 
 The self-test passes (exit 0) only if every reference tier detects the mutation, which
-shows the tiers exercise the checkout under test and not an installed copy.
+shows the tiers exercise the checkout under test and not an installed copy. Every behaviour tier
+must pass on the unmutated HEAD first ("tier X fails without mutation").
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
 ## Claude Code plugin

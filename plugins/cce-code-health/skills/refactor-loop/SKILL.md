@@ -87,7 +87,7 @@ The playbook commit is a docs/config commit, separate from refactor commits.
 
 Stop when no target in scope has debt above the profile thresholds, three consecutive
 targets yield nothing, or the budget is reached. Then run the campaign cadence
-(`codehealth gate --mode refactor --cadence campaign --base <campaign base>`) and the
+(`codehealth gate --mode refactor --cadence campaign --base <campaign base> --ref-base <campaign base>`) and the
 repo's merge gate (OpenFlowsheet: CI green on both architectures, F0 on main). PR without
 squash. Report in ~20 lines: debt and display health before/after (scan), per file;
 accepted/attempted; gate-fails by tier; top recipes; anything needing a human decision

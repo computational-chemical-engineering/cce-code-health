@@ -152,9 +152,13 @@ def cmd_self_test(a, repo: Path, log: Path) -> int:
                         "checks": [c.__dict__ for c in checks]})
     print(f"  mutation: {what}")
     for c in checks:
-        print(f"  {'detected' if c.ok else 'MISSED  '} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
+        label = "detected" if c.ok else "BASELINE" if "without mutation" in c.detail else "MISSED  "
+        print(f"  {label} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
+    kind = gatemod.self_test_kind(cfg)
     print(f"SELF-TEST {'PASS' if ok else 'FAIL'} {repo.name}: "
-          f"{sum(c.ok for c in checks)}/{len(checks)} reference tiers detected the mutation (log {log})")
+          f"{sum(c.ok for c in checks)}/{len(checks)} {kind} tiers detected the mutation (log {log})"
+          if what != "none (baseline failed)" else
+          f"SELF-TEST FAIL {repo.name}: {len(checks)} tier(s) fail without mutation (log {log})")
     return 0 if ok else 1
 
 
@@ -163,20 +167,39 @@ def cmd_gate(a) -> int:
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
     if a.self_test:
         return cmd_self_test(a, repo, log)
-    checks, base = gatemod.gate(repo, a.base, a.cadence, log,
-                                 Path(a.config).resolve() if a.config else None, a.mode)
+    checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
+                                          Path(a.config).resolve() if a.config else None, a.mode,
+                                          a.ref_base)
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
-                                 "head": "worktree", "cadence": a.cadence, "mode": a.mode, "log": str(log)},
+                                 "ref_base": ref_base, "head": "worktree", "cadence": a.cadence, "mode": a.mode, "log": str(log)},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
         print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
     failed = [c.name for c in checks if not c.ok]
     verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
-    print(f"GATE {verdict} {repo.name} base={base[:10]} head=worktree "
-          f"mode={a.mode} cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
+    print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
+          f"head=worktree mode={a.mode} cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
           + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
     return 1 if failed else 3 if a.config else 0
+
+
+def cmd_config(a) -> int:
+    repo = Path(a.repo).resolve()
+    if not a.check:
+        print("codehealth: error: config needs --check", file=sys.stderr)
+        return 2
+    path = Path(a.config) if a.config else repo / config.CONFIG_PATH
+    if not path.is_file():
+        print(f"CONFIG FAIL {path}: no such file")
+        return 1
+    info, problems = config.check(path.read_text())
+    for line in info:
+        print(f"  {line}")
+    for p in problems:
+        print(f"  PROBLEM {p}")
+    print(f"CONFIG {'FAIL' if problems else 'OK'} {path}: {len(problems)} problem(s)")
+    return 1 if problems else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -193,12 +216,20 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--json", help="write the full report to this file")
         if name in ("scan", "hotspots"):
             p.add_argument("--top", type=int, default=20)
+    pc = sub.add_parser("config", help="validate the gate configuration")
+    pc.set_defaults(fn=cmd_config)
+    pc.add_argument("--repo", default=".")
+    pc.add_argument("--json", help=argparse.SUPPRESS)
+    pc.add_argument("--check", action="store_true", help="validate .codehealth/config.toml")
+    pc.add_argument("--config", help="validate this file instead of the working tree's config")
     sub.choices["scan"].add_argument("--ref", help="commit to scan (default: working tree)")
     sub.choices["diff"].add_argument("--base", default="HEAD",
                                      help="base ref; its merge-base with head is used (default HEAD)")
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")
     sub.choices["hotspots"].add_argument("--since", help="only count commits since this date")
     sub.choices["gate"].add_argument("--base", default="HEAD", help="base ref (merge-base is used)")
+    sub.choices["gate"].add_argument("--ref-base", help="campaign base for reference and benchmark tiers "
+                                     "(merge-base is used; default: same as --base)")
     sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize"), default="refactor",
                                      help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup")
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
