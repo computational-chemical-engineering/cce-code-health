@@ -24,6 +24,8 @@ Gate hardened after think review 2026-11-12 (55 tests; see DECISIONS). Skill opt
 Decisions 11-14 taken 2026-11-12; 11-13 implemented (--ref-base with cached base outputs, head twice; speedup lower confidence bound with extended rounds; numeric-literals report; coverage = true per reference tier). Adopter fixes from OpenFlowsheet (self-test baseline, config --check, prefix, glob). 69 tests. 14 when Peclet is onboarded.
 Skill refactor-loop + seed recipes written 2026-11-12; self-test counts behaviour command tiers when no reference tier (lint tiers: behaviour = false). 56 tests.
 OpenFlowsheet: S16 running since ~12:00 (wp/S16, opus-engineer, incl. run/select --lines/recall). Campaign = S17 (wp/S17): first work order installs codehealth (.venv-codehealth from requirements-codehealth.txt pinned to a full SHA), .codehealth/config.toml (my draft + frozen: application/bindings/descriptions/*, schemas/*, messages/catalogue/*, benchmarks/f0/*; MCP digest tier = pytest tests/test_t08_w2_surface_digest.py tests/test_m07a_surface_chain.py), informational CI diff job; starts when S16 merged. S18 = scale probe. Identity-epoch question answered after campaign 1.
+Versioning: setuptools-scm since cec6dbeb (each commit a distinct pip version). OpenFlowsheet S17 pinned at 83614510 (wp/S17 990c5fb4), waiting for S16 merge.
+Tier processes run in their own process group; timeout or interrupt kills the whole group, stragglers of finished tiers are killed too (reported by OpenFlowsheet-TR09 2026-11-12, xdist worker survived a hung test). Skills require a timeout per behaviour tier. 72 tests.
 Still to build: skills setup, healthy-coding; playbook stats.
 
 Next action (old): `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,

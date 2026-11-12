@@ -25,6 +25,8 @@ refactor commit gated in refactor mode, then optimise.
      (other benchmark tiers only guard against slowdown);
    - `[gate.env]` pins for determinism: OMP_NUM_THREADS, OPENBLAS_NUM_THREADS and
      MKL_NUM_THREADS are required by the gate, plus seeds as needed.
+   - a `timeout` on every behaviour tier (the gate kills the tier's process group on
+     timeout; it counts as detected in the self-test and as a failure in a step).
    **Never invent, widen or edit a tolerance, benchmark, min_speedup or any config.**
    Tolerances are a scientific decision of the human: they must sit well below the
    discretisation error and solver tolerances of the outputs they guard. If missing,

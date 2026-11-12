@@ -1,4 +1,0 @@
-complexipy>=8
-
-[test]
-pytest

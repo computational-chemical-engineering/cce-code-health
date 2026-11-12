@@ -18,6 +18,9 @@ campaign is one of its work packages and follows those rules.
 2. The base commit has `.codehealth/config.toml` with `[scope]`, `[gate]` static rules and
    behaviour tiers (tests, identity checks, reference cases). Never edit it during a
    campaign; the gate forbids it anyway.
+   Every behaviour tier needs a `timeout` (a hung test otherwise stalls the loop; on
+   timeout the gate kills the tier's whole process group). A timeout counts as detected
+   in the self-test and as `gate-fail` in a step. Missing timeouts: ask the human.
 3. Clean tree, campaign branch (repo naming convention), in a worktree if other agents or
    sessions use the repo.
 4. `codehealth gate --self-test --mutate <path:line>` on a literal in a function the tests

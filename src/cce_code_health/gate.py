@@ -101,6 +101,7 @@ import statistics
 import subprocess
 import resource
 import shutil
+import signal
 import tempfile
 import time
 from collections import Counter
@@ -355,15 +356,41 @@ def _run(cmd: str, cwd: Path, env: dict, log, timeout: float | None) -> tuple[in
     env = {k: v.replace("{repo}", str(cwd)) for k, v in env.items()}
     log.write(f"\n$ (cwd {cwd}) {cmd}\n")
     log.flush()
+    # Own process group: on timeout (or interrupt) the whole tree dies, not only the shell.
+    # Otherwise grandchildren such as pytest-xdist workers on a hung test keep running.
+    proc = subprocess.Popen(cmd, shell=True, cwd=cwd, env={**os.environ, **env},
+                            stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     try:
-        r = subprocess.run(cmd, shell=True, cwd=cwd, env={**os.environ, **env},
-                           stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
-        rc = r.returncode
+        rc = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         log.write(f"TIMEOUT after {timeout} s\n")
         rc = 124
+    finally:
+        _kill_group(proc)  # also reaps stragglers a finished tier left behind
     log.write(f"exit {rc}\n")
     return rc, time.monotonic() - t0
+
+
+_KILL_GRACE = 5.0  # seconds between SIGTERM and SIGKILL
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGTERM the process group of proc, then SIGKILL whatever survives the grace period."""
+    def signal_group(sig) -> bool:
+        try:
+            os.killpg(proc.pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False  # group is empty
+    if not signal_group(signal.SIGTERM):
+        return
+    deadline = time.monotonic() + _KILL_GRACE
+    while time.monotonic() < deadline:
+        if proc.poll() is not None and not signal_group(0):
+            return
+        time.sleep(0.05)
+    signal_group(signal.SIGKILL)
+    proc.wait()
 
 
 def _fill(cmd: str, **kw) -> str:
