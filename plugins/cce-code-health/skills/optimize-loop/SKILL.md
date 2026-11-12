@@ -20,17 +20,21 @@ refactor commit gated in refactor mode, then optimise.
 1. `codehealth --version` works (installed from the pinned tag in the repo's docs/CI).
 2. `.codehealth/config.toml` at the base commit has:
    - at least one `kind = "reference"` tier with a `tolerance = {rel, abs, ulp}`;
-   - at least one `kind = "benchmark"` tier (with `repeat`, `min_speedup`);
-   - `[gate.env]` pins for determinism (threads, seeds).
+   - exactly one `kind = "benchmark"` tier with `primary = true` and `min_speedup`
+     (other benchmark tiers only guard against slowdown);
+   - `[gate.env]` pins for determinism: OMP_NUM_THREADS, OPENBLAS_NUM_THREADS and
+     MKL_NUM_THREADS are required by the gate, plus seeds as needed.
    **Never invent, widen or edit a tolerance, benchmark, min_speedup or any config.**
    Tolerances are a scientific decision of the human: they must sit well below the
    discretisation error and solver tolerances of the outputs they guard. If missing,
    propose values with reasoning and wait.
 3. Clean working tree; work on a branch `perf/<campaign-id>` (in a worktree if other
    agents or sessions use the repo).
-4. `codehealth gate --mode optimize --base HEAD` on the untouched tree reports the
-   benchmark as "no speedup" and every reference as bitwise equal. This proves the
-   harness runs and is deterministic. Record the base median times.
+4. `codehealth gate --self-test` passes: a mutated constant must make every reference
+   tier fail. This proves the base run really executes base code (an installed package or
+   an absolute import path would compare head with head). Then make a no-op edit (comment)
+   and run `codehealth gate --mode optimize --base HEAD`: the primary benchmark must report
+   no speedup and every reference bitwise equal. Record the base times.
 
 ## Campaign files
 
@@ -57,8 +61,10 @@ refactor commit gated in refactor mode, then optimise.
 4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit>`.
    It checks static rules, debt (may not rise), every reference within tolerance, and the
    benchmark speedup >= `min_speedup`.
-5. **Noise discipline**: if the speedup is less than twice the larger reported spread,
-   rerun the gate once. Accept only if both runs pass. Never accept on a single lucky run.
+5. **Noise discipline** (interim rule until a confidence-interval criterion is decided):
+   the gate reports the median and the min/max of the paired ratios base_i/head_i. If the
+   minimum paired ratio is below `min_speedup` while the median passes, rerun the gate
+   with `repeat` doubled; accept only if both runs pass. Never accept on a single lucky run.
 6. **Accept or revert.**
    - Accept: commit with message `perf(<area>): <what>` and trailers
      `Codehealth-Class: optimize`, `Codehealth-Recipe: <id>`,

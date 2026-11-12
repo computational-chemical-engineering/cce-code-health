@@ -61,11 +61,30 @@ codehealth gate --base main --mode optimize    # declared tolerance, required sp
 codehealth gate --base main --cadence campaign # also the slow tiers
 ```
 
-Static rules (frozen files, forbidden paths, string literals, public API, debt may not
-rise) and repo-supplied tiers from `[gate]` in the base's config: `command` (exit code),
-`reference` (outputs at head vs base; base run twice for determinism; bitwise in refactor
-mode, `tolerance = {rel, abs, ulp}` in optimize mode) and `benchmark` (alternating base and
-head runs, median times; `max_slowdown` in refactor mode, `min_speedup` in optimize mode).
+Static rules (frozen files, forbidden paths with `.codehealth/*` always forbidden, every
+touched path in scope, string literals, public API including decorators, dunder methods,
+module constants, `__all__`, re-exports and class fields, debt may not rise) and
+repo-supplied tiers from `[gate]` in the base's config: `command` (exit code), `reference`
+(outputs at head vs base; base run twice for determinism; bitwise in refactor mode,
+`tolerance = {rel, abs, ulp}` in optimize mode; `.npy` shape and dtype must match, integers
+compare exactly, non-finite values must match) and `benchmark` (warm-up, then ABBA paired
+runs, median of the paired ratios, fresh TMPDIR, no writes into the tree). Benchmark tiers
+require `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` in `[gate.env]`. In
+optimize mode only the tier with `primary = true` must reach `min_speedup`; every other
+benchmark tier may not slow down beyond `max_slowdown` (default 0.03).
+
+Empty gates fail: an empty diff at cadence step, optimize mode without a reference tier or
+a primary benchmark with `min_speedup`, refactor mode without a reference or command tier.
+With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3. The base worktree
+lives under `<git-common-dir>/codehealth/`.
+
+```bash
+codehealth gate --self-test                      # mutate one literal in a HEAD worktree
+codehealth gate --self-test --mutate src/a.py:42 # ... or the literal on this line
+```
+
+The self-test passes (exit 0) only if every reference tier detects the mutation, which
+shows the tiers exercise the checkout under test and not an installed copy.
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
 ## Claude Code plugin

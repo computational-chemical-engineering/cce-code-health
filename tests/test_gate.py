@@ -4,6 +4,7 @@ import pytest
 from test_git import commit, git
 
 from cce_code_health.cli import main
+from cce_code_health.gate import _public_api
 
 PY = sys.executable
 CONFIG = f"""
@@ -43,7 +44,7 @@ def calc(x):
 @pytest.fixture
 def repo(tmp_path):
     git(tmp_path, "init", "-q", "-b", "main")
-    commit(tmp_path, {".codehealth/config.toml": CONFIG, "pkg/__init__.py": "", "pkg/mod.py": MOD,
+    commit(tmp_path, {".gitignore": "__pycache__/\n", ".codehealth/config.toml": CONFIG, "pkg/__init__.py": "", "pkg/mod.py": MOD,
                       "frozen/ident.py": "X = 1\n", "tests/test_x.py": "def test(): pass\n"})
     return tmp_path
 
@@ -90,6 +91,7 @@ def test_frozen_and_forbidden_paths_fail(repo, capsys):
 
 
 def test_campaign_cadence_runs_slow_tier(repo):
+    edit(repo, "pkg/mod.py", MOD.replace("Docstrings may change.", "Changed doc."))
     assert gate(repo) == 0
     assert gate(repo, "--cadence", "campaign") == 1
 
@@ -98,5 +100,96 @@ def test_nondeterministic_reference_is_flagged(repo, capsys):
     cfg = (repo / ".codehealth/config.toml").read_text().replace(
         "repr(m.calc(7))", "repr(__import__(\\\"os\\\").urandom(8))")
     commit(repo, {".codehealth/config.toml": cfg})
+    edit(repo, "pkg/mod.py", MOD.replace("Docstrings may change.", "Changed doc."))
     assert gate(repo) == 1
     assert "not deterministic" in capsys.readouterr().out
+
+
+def doc_edit(repo):
+    edit(repo, "pkg/mod.py", MOD.replace("Docstrings may change.", "Changed doc."))
+
+
+def set_config(repo, cfg):
+    commit(repo, {".codehealth/config.toml": cfg})
+
+
+def test_out_of_scope_path_fails(repo, capsys):
+    doc_edit(repo)
+    edit(repo, "README.md", "hi\n")
+    assert gate(repo) == 1
+    assert "FAIL scope" in capsys.readouterr().out
+
+
+def test_codehealth_dir_always_forbidden(repo, capsys):
+    doc_edit(repo)
+    edit(repo, ".codehealth/config.toml", CONFIG + "\n# loosened\n")
+    assert gate(repo) == 1
+    assert "FAIL forbid" in capsys.readouterr().out
+
+
+def test_frozen_cmd_runs_at_base(repo, capsys):
+    set_config(repo, CONFIG.replace("[gate]\n", '[gate]\nfrozen_cmd = "cat .frozen"\n', 1))
+    commit(repo, {".frozen": "pkg/mod.py\n"})
+    doc_edit(repo)
+    edit(repo, ".frozen", "")                       # the working tree must not choose the list
+    assert gate(repo) == 1
+    assert "FAIL frozen" in capsys.readouterr().out
+
+
+def test_empty_diff_fails(repo, capsys):
+    assert gate(repo) == 1
+    assert "nothing to gate" in capsys.readouterr().out
+
+
+def test_trial_config_exits_3(repo, capsys):
+    trial = repo.parent / "trial.toml"
+    trial.write_text(CONFIG)
+    doc_edit(repo)
+    assert gate(repo, "--config", str(trial)) == 3
+    assert "GATE TRIAL" in capsys.readouterr().out
+    edit(repo, "pkg/mod.py", MOD.replace("x * 3 + 1", "x * 3 + 2"))
+    assert gate(repo, "--config", str(trial)) == 1
+
+
+def test_refactor_without_reference_or_command_tier_fails(repo, capsys):
+    set_config(repo, CONFIG.split("[[gate.tier]]")[0])
+    doc_edit(repo)
+    assert gate(repo) == 1
+    assert "refactor mode needs" in capsys.readouterr().out
+
+
+def test_self_test_passes(repo, capsys):
+    assert main(["gate", "--repo", str(repo), "--self-test", "--log", str(repo.parent / "s.log")]) == 0
+    assert "SELF-TEST PASS" in capsys.readouterr().out
+    assert main(["gate", "--repo", str(repo), "--self-test", "--mutate", "pkg/mod.py:7",
+                 "--log", str(repo.parent / "s.log")]) == 0
+    assert not (repo / ".git/codehealth/selftest").exists()
+
+
+def test_self_test_fails_when_tier_imports_head_checkout(repo, capsys):
+    cfg = CONFIG.replace("import pkg.mod as m, sys; open",
+                         f'import sys; sys.path.insert(0, \\"{repo}\\"); import pkg.mod as m; open')
+    assert str(repo) in cfg
+    set_config(repo, cfg)
+    assert main(["gate", "--repo", str(repo), "--self-test", "--log", str(repo.parent / "s.log")]) == 1
+    assert "SELF-TEST FAIL" in capsys.readouterr().out
+
+
+def test_removed_module_constant_fails_public_api(repo, capsys):
+    edit(repo, "pkg/mod.py", MOD.replace('LABEL = "calc"\n', ""))
+    assert gate(repo) == 1
+    assert "LABEL removed" in capsys.readouterr().out
+
+
+def test_public_api_decorator_dataclass_field_all_reexport():
+    base = "def f(x):\n    pass\n\n@dataclass\nclass C:\n    a: int\n    b: float = 1.0\n\nK = 1\n"
+    head = base.replace("def f", "@cache\ndef f").replace("a: int", "a: str")
+    ab, ah = _public_api(base), _public_api(head)
+    assert ab["f"] != ah["f"] and "@cache" in ah["f"]
+    assert ab["C.a"] != ah["C.a"] and "C.b" in ab and ab["K"] == "const"
+    assert "K" not in _public_api(base.replace("K = 1\n", ""))
+    assert _public_api('__all__ = ["g", "f"]\n')["__all__"] == "['f', 'g']"
+    assert "C.__len__" in _public_api("class C:\n    def __len__(self): return 1\n")
+    assert _public_api("from .m import a, _b, d as e\n", "pkg/__init__.py") == {
+        "a": "re-export", "e": "re-export"}
+    assert _public_api("from .m import a\n", "pkg/x.py") == {}

@@ -142,9 +142,27 @@ def cmd_hotspots(a) -> int:
     return 0
 
 
+def cmd_self_test(a, repo: Path, log: Path) -> int:
+    base = gitio.rev(repo, "HEAD")
+    cfg = (config.parse(Path(a.config).read_text(), f"override:{a.config}") if a.config
+           else config.load(repo, base))
+    ok, checks, what = gatemod.self_test(repo, cfg, log, a.mutate)
+    write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "self_test": True,
+                                 "mutation": what, "log": str(log)},
+                        "checks": [c.__dict__ for c in checks]})
+    print(f"  mutation: {what}")
+    for c in checks:
+        print(f"  {'detected' if c.ok else 'MISSED  '} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
+    print(f"SELF-TEST {'PASS' if ok else 'FAIL'} {repo.name}: "
+          f"{sum(c.ok for c in checks)}/{len(checks)} reference tiers detected the mutation (log {log})")
+    return 0 if ok else 1
+
+
 def cmd_gate(a) -> int:
     repo = Path(a.repo).resolve()
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
+    if a.self_test:
+        return cmd_self_test(a, repo, log)
     checks, base = gatemod.gate(repo, a.base, a.cadence, log,
                                  Path(a.config).resolve() if a.config else None, a.mode)
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
@@ -153,11 +171,12 @@ def cmd_gate(a) -> int:
     for c in checks:
         print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
     failed = [c.name for c in checks if not c.ok]
-    print(f"GATE {'FAIL' if failed else 'PASS'} {repo.name} base={base[:10]} head=worktree "
+    verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
+    print(f"GATE {verdict} {repo.name} base={base[:10]} head=worktree "
           f"mode={a.mode} cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
           + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
-    return 1 if failed else 0
+    return 1 if failed else 3 if a.config else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
     sub.choices["gate"].add_argument("--log", help="full log of tier commands")
     sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")
+    sub.choices["gate"].add_argument("--self-test", action="store_true",
+                                     help="mutate one literal in a temporary HEAD worktree; every reference tier must detect it")
+    sub.choices["gate"].add_argument("--mutate", help="with --self-test: mutate the literal at path:line")
     a = ap.parse_args(argv)
     try:
         return a.fn(a)
