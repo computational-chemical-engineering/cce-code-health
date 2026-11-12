@@ -1,0 +1,6 @@
+{
+  "name": "cce-code-health",
+  "version": "0.2.0-dev",
+  "description": "Skills for code-health work driven by the codehealth CLI (experimental).",
+  "license": "MIT"
+}

@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import os
 import shlex
+import statistics
 import subprocess
 import tempfile
 import time
@@ -38,6 +39,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from . import config, gitio
+from .compare import compare
 
 
 @dataclass
@@ -165,65 +167,120 @@ def _outputs(out: Path, names) -> dict[str, bytes | None]:
     return {n: (out / n).read_bytes() if (out / n).is_file() else None for n in names}
 
 
-def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, log) -> list[Check]:
+def _base_tree(repo: Path, base: str, holder: list) -> Path:
+    if not holder:
+        holder.append(Path(tempfile.mkdtemp(prefix="codehealth-base-")))
+        gitio.git(repo, "worktree", "add", "--detach", "-f", str(holder[0]), base)
+    return holder[0]
+
+
+def _reference(t, repo, base, files, env, log, mode, tree) -> tuple[bool, str]:
+    names, timeout, runs = t["outputs"], t.get("timeout"), []
+    for cwd in (tree, tree, repo):
+        out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
+        rc, _ = _run(_fill(t["cmd"], repo=str(cwd), base=base, files=files, out=str(out)),
+                     cwd, env, log, timeout)
+        if rc != 0:
+            return False, f"exit {rc} at {'head' if cwd == repo else 'base'}"
+        runs.append(_outputs(out, names))
+    b1, b2, h = runs
+    missing = [n for n in names if b1[n] is None or h[n] is None]
+    if missing:
+        return False, "missing output: " + ", ".join(missing)
+    nondet = [n for n in names if b1[n] != b2[n]]
+    if nondet:
+        return False, "not deterministic at base: " + ", ".join(nondet)
+    # Refactor mode is always bitwise; optimize mode uses the human-declared tolerance.
+    tol = t.get("tolerance") if mode == "optimize" else None
+    ok, details = True, []
+    for n in names:
+        good, detail = compare(b1[n], h[n], n, tol)
+        ok &= good
+        if detail != "bitwise equal":
+            details.append(f"{n}: {detail}")
+    return ok, "; ".join(details) or "bitwise equal"
+
+
+def _benchmark(t, repo, base, files, env, log, mode, tree) -> tuple[bool, str]:
+    """Alternate base and head runs; compare median wall times."""
+    repeat, timeout = int(t.get("repeat", 5)), t.get("timeout")
+    times = {"base": [], "head": []}
+    for _ in range(repeat):
+        for side, cwd in (("base", tree), ("head", repo)):
+            rc, sec = _run(_fill(t["cmd"], repo=str(cwd), base=base, files=files, out=""),
+                           cwd, env, log, timeout)
+            if rc != 0:
+                return False, f"exit {rc} at {side}"
+            times[side].append(sec)
+    med = {k: statistics.median(v) for k, v in times.items()}
+    spread = {k: (max(v) - min(v)) / med[k] if med[k] else 0.0 for k, v in times.items()}
+    speedup = med["base"] / med["head"] if med["head"] else float("inf")
+    detail = (f"speedup {speedup:.3f} (base {med['base']:.3g} s ±{100 * spread['base']:.0f}%, "
+              f"head {med['head']:.3g} s ±{100 * spread['head']:.0f}%, n={repeat})")
+    if mode == "optimize":
+        need = float(t.get("min_speedup", 1.0))
+        return speedup >= need, detail + f", need >= {need}"
+    allowed = float(t.get("max_slowdown", 0.03))
+    return speedup >= 1 / (1 + allowed), detail + f", max slowdown {allowed:.0%}"
+
+
+def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, log,
+              mode: str = "refactor") -> list[Check]:
     g = cfg.gate
     env = {k: str(v) for k, v in g.get("env", {}).items()}
     files = " ".join(shlex.quote(hp) for _, _, hp in changes if hp)
-    tiers = [t for t in g.get("tier", []) if cadence == "campaign" or t.get("cadence", "step") == "step"]
-    checks, base_tree = [], None
+    tiers = [t for t in g.get("tier", [])
+             if (cadence == "campaign" or t.get("cadence", "step") == "step")
+             and mode in t.get("modes", ["refactor", "optimize"])]
+    checks, holder = [], []
     try:
         for t in tiers:
-            name, kind, timeout = t["name"], t.get("kind", "command"), t.get("timeout")
+            name, kind, t0 = t["name"], t.get("kind", "command"), time.monotonic()
             if kind == "command":
-                rc, sec = _run(_fill(t["cmd"], repo=str(repo), base=base, files=files, out=""),
-                               repo, env, log, timeout)
-                checks.append(Check(name, rc == 0, f"exit {rc}" if rc else "", sec))
-            elif kind == "reference":
-                if base_tree is None:
-                    base_tree = Path(tempfile.mkdtemp(prefix="codehealth-base-"))
-                    gitio.git(repo, "worktree", "add", "--detach", "-f", str(base_tree), base)
-                names, t0, detail = t["outputs"], time.monotonic(), ""
-                runs = []
-                for cwd in (base_tree, base_tree, repo):
-                    out = Path(tempfile.mkdtemp(prefix=f"codehealth-{name}-"))
-                    rc, _ = _run(_fill(t["cmd"], repo=str(cwd), base=base, files=files, out=str(out)),
-                                 cwd, env, log, timeout)
-                    if rc != 0:
-                        detail = f"exit {rc} at {'head' if cwd == repo else 'base'}"
-                        break
-                    runs.append(_outputs(out, names))
-                if not detail:
-                    b1, b2, h = runs
-                    missing = [n for n in names if b1[n] is None]
-                    nondet = [n for n in names if b1[n] != b2[n]]
-                    changed = [n for n in names if b1[n] != h[n]]
-                    if missing:
-                        detail = "missing at base: " + ", ".join(missing)
-                    elif nondet:
-                        detail = "not deterministic at base: " + ", ".join(nondet)
-                    elif changed:
-                        detail = "differs from base: " + ", ".join(changed)
-                checks.append(Check(name, not detail, detail, time.monotonic() - t0))
+                rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, files=files, out=""),
+                             repo, env, log, t.get("timeout"))
+                ok, detail = rc == 0, (f"exit {rc}" if rc else "")
+            elif kind in ("reference", "benchmark"):
+                fn = _reference if kind == "reference" else _benchmark
+                ok, detail = fn(t, repo, base, files, env, log, mode, _base_tree(repo, base, holder))
             else:
                 raise ValueError(f"tier {name}: unknown kind {kind!r}")
-            log.write(f"--- tier {name}: {'PASS' if checks[-1].ok else 'FAIL'} {checks[-1].detail}\n")
-            if not checks[-1].ok and not g.get("keep_going", False):
+            checks.append(Check(name, ok, detail, time.monotonic() - t0))
+            log.write(f"--- tier {name}: {'PASS' if ok else 'FAIL'} {detail}\n")
+            if not ok and not g.get("keep_going", False):
                 break
     finally:
-        if base_tree is not None:
-            gitio.git(repo, "worktree", "remove", "--force", str(base_tree))
+        for tree in holder:
+            gitio.git(repo, "worktree", "remove", "--force", str(tree))
     return checks
 
 
+def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> Check:
+    """Debt over the touched in-scope files must not rise (both modes)."""
+    from .cli import analyze_ref  # noqa: PLC0415 (cli imports this module)
+    bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
+    hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
+    db = sum(r["debt"] for r in analyze_ref(repo, base, cfg, bp).values())
+    dh = sum(r["debt"] for r in analyze_ref(repo, None, cfg, hp).values())
+    return Check("debt", dh <= db + 1e-9, f"{db:.1f} -> {dh:.1f}")
+
+
 def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
-         config_override: Path | None = None) -> tuple[list[Check], str]:
-    """config_override is for local trials only; CI must use the base's committed config."""
+         config_override: Path | None = None, mode: str = "refactor") -> tuple[list[Check], str]:
+    """config_override is for local trials only; CI must use the base's committed config.
+
+    mode "refactor": references bitwise, benchmark may not slow down beyond max_slowdown.
+    mode "optimize": references within each tier's declared `tolerance`, benchmark must
+    reach min_speedup. Debt may not rise in either mode.
+    """
+    if mode not in ("refactor", "optimize"):
+        raise ValueError(f"unknown mode {mode!r}")
     base = gitio.merge_base(repo, base_ref, "HEAD")
     cfg = (config.parse(config_override.read_text(), f"override:{config_override}")
            if config_override else config.load(repo, base))
     changes = gitio.changes(repo, base, None)
-    checks = static_checks(repo, base, cfg, changes)
+    checks = static_checks(repo, base, cfg, changes) + [debt_check(repo, base, cfg, changes)]
     if all(c.ok for c in checks):
         with open(log_path, "w") as log:
-            checks += run_tiers(repo, base, cfg, changes, cadence, log)
+            checks += run_tiers(repo, base, cfg, changes, cadence, log, mode)
     return checks, base

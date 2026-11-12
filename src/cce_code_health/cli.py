@@ -146,15 +146,15 @@ def cmd_gate(a) -> int:
     repo = Path(a.repo).resolve()
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
     checks, base = gatemod.gate(repo, a.base, a.cadence, log,
-                                 Path(a.config).resolve() if a.config else None)
+                                 Path(a.config).resolve() if a.config else None, a.mode)
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
-                                 "head": "worktree", "cadence": a.cadence, "log": str(log)},
+                                 "head": "worktree", "cadence": a.cadence, "mode": a.mode, "log": str(log)},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
         print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
     failed = [c.name for c in checks if not c.ok]
     print(f"GATE {'FAIL' if failed else 'PASS'} {repo.name} base={base[:10]} head=worktree "
-          f"cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
+          f"mode={a.mode} cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
           + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
     return 1 if failed else 0
@@ -180,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")
     sub.choices["hotspots"].add_argument("--since", help="only count commits since this date")
     sub.choices["gate"].add_argument("--base", default="HEAD", help="base ref (merge-base is used)")
+    sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize"), default="refactor",
+                                     help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup")
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
     sub.choices["gate"].add_argument("--log", help="full log of tier commands")
     sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")

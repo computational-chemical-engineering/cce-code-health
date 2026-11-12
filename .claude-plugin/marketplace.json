@@ -1,0 +1,14 @@
+{
+  "name": "cce-code-health",
+  "description": "Code-health tooling for coding agents: metrics, CI ratchet, behaviour-preserving refactor and optimisation loops.",
+  "owner": {
+    "name": "computational-chemical-engineering"
+  },
+  "plugins": [
+    {
+      "name": "cce-code-health",
+      "source": "./plugins/cce-code-health",
+      "description": "Refactor and optimise code with measured evidence: debt never rises, behaviour is gated, a per-repo playbook grows."
+    }
+  ]
+}

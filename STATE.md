@@ -20,7 +20,7 @@ OpenFlowsheet adopter findings: docs/adopters/openflowsheet.md (F0 identity gate
 Coverage/xdist in OpenFlowsheet: user wants it; OpenFlowsheet-TR09 plan received approved as wp/S16, starts after budget reset 2026-11-12 13:00; see adopter notes. Hub informed of this project. First scope confirmed: application/ (campaign after S16 merge).
 
 codehealth gate built (static rules, command and reference tiers, cadence, trial --config); OpenFlowsheet trial: F0 misses an application/ behaviour change, so impacted tests (S16) are required.
-Open design question (user, 2026-11-12): performance-motivated changes that alter round-off (Peclet, pymrm): tolerance comparators + perf tier, separate commit class.
+optimize mode + benchmark tier + tolerance comparator built (0.2.0.dev0); plugin skeleton with skill optimize-loop (plugins/cce-code-health). 26 tests. Pending: think review of gate rules (tolerance policy, benchmark statistics); skills refactor-loop, setup, healthy-coding; playbook stats.
 
 Next action (old): `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
 bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills

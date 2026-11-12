@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cce-code-health"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Code-health metrics, CI ratchet and tooling for a behaviour-preserving agentic refactor loop (experimental)"
 readme = "README.md"
 license = "MIT"
