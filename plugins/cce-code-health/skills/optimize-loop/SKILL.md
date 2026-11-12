@@ -38,7 +38,7 @@ refactor commit gated in refactor mode, then optimise.
 
 ## Campaign files
 
-- Run log: `.codehealth/runs/<campaign-id>.jsonl`, one JSON object per attempt:
+- Run log: ``$(git rev-parse --git-common-dir)/codehealth/runs/<campaign-id>.jsonl` during the campaign (the gate forbids changes under `.codehealth/` in a step; copy it there in a separate docs commit at the end), one JSON object per attempt:
   `{"campaign","step","class":"optimize","target":"path::qualname","recipe","hypothesis",
   "result":"accepted|gate-fail|no-gain|review-reject","failed_tier","speedup",
   "max_deviation","debt_before","debt_after","base_sha","head_sha","tool_version","model"}`.

@@ -458,7 +458,8 @@ def mutate_source(source: str, site) -> tuple[str, str]:
 
 def self_test(repo: Path, cfg: config.Config, log_path: Path,
               mutate: str | None = None) -> tuple[bool, list[Check], str]:
-    """Mutate one literal in a temporary HEAD worktree; every reference tier must detect it."""
+    """Mutate one literal in a temporary HEAD worktree. With reference tiers, every one must
+    detect it; without, at least one command tier not marked `behaviour = false` must."""
     head = gitio.rev(repo, "HEAD")
     root = _common_dir(repo)
     tree = root / "selftest"
@@ -490,15 +491,24 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
         with open(log_path, "w") as log:
             checks = run_tiers(tree, head, cfg, changes, "campaign", log, "refactor",
                                keep_going=True, kinds=("reference", "command"))
-        refs = {t["name"] for t in _selected(cfg, "campaign", "refactor") if t.get("kind") == "reference"}
-        detected = [c for c in checks if c.name in refs and not c.ok]
-        missed = [c for c in checks if c.name in refs and c.ok]
-        ok = bool(refs) and not missed and len(detected) == len(refs)
-        # reported as a check per reference tier: ok means "detected the mutation"
-        out = [Check(c.name, c.name not in {m.name for m in missed}, c.detail, c.seconds)
-               for c in checks if c.name in refs]
-        if not refs:
-            out.append(Check("self-test", False, "no reference tier to test"))
+        tiers = _selected(cfg, "campaign", "refactor")
+        refs = {t["name"] for t in tiers if t.get("kind") == "reference"}
+        if refs:
+            # Every reference tier must detect the mutation.
+            missed = [c for c in checks if c.name in refs and c.ok]
+            ok = not missed and len([c for c in checks if c.name in refs]) == len(refs)
+            out = [Check(c.name, not c.ok, c.detail or "detected" if not c.ok else "missed", c.seconds)
+                   for c in checks if c.name in refs]
+        else:
+            # No reference tier: at least one behaviour command tier must detect it.
+            # Tiers marked `behaviour = false` (lint, format) do not count.
+            beh = {t["name"] for t in tiers if t.get("kind", "command") == "command"
+                   and t.get("behaviour", True)}
+            out = [Check(c.name, not c.ok, "detected" if not c.ok else "missed", c.seconds)
+                   for c in checks if c.name in beh]
+            ok = any(c.ok for c in out)
+            if not beh:
+                out.append(Check("self-test", False, "no reference or behaviour command tier"))
         return ok, out, what
     finally:
         _remove_tree(repo, tree)

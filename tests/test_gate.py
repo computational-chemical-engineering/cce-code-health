@@ -193,3 +193,23 @@ def test_public_api_decorator_dataclass_field_all_reexport():
     assert _public_api("from .m import a, _b, d as e\n", "pkg/__init__.py") == {
         "a": "re-export", "e": "re-export"}
     assert _public_api("from .m import a\n", "pkg/x.py") == {}
+
+
+def test_self_test_with_command_tiers_only(tmp_path, capsys):
+    cfg = CONFIG.split("[[gate.tier]]")[0] + f"""
+[[gate.tier]]
+name = "lint"
+behaviour = false
+cmd = "exit 0"
+[[gate.tier]]
+name = "unit"
+cmd = '{PY} -c "import pkg.mod as m; assert m.calc(3) == 10"'
+"""
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".codehealth/config.toml": cfg, ".gitignore": "__pycache__/\n",
+                      "pkg/__init__.py": "", "pkg/mod.py": MOD})
+    log = str(tmp_path.parent / "s.log")
+    assert main(["gate", "--repo", str(tmp_path), "--self-test", "--log", log]) == 0
+    weak = cfg.replace("m.calc(3) == 10", "True")
+    commit(tmp_path, {".codehealth/config.toml": weak})
+    assert main(["gate", "--repo", str(tmp_path), "--self-test", "--log", log]) == 1
