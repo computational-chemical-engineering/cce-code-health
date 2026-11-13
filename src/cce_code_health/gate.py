@@ -106,6 +106,39 @@ entry is identical; public names new at head must be listed in new_public, and e
 must exist at head. Meta `plan` = {path, blob (sha at base), id}; `codehealth log` writes class
 `restructure` and, as for refactor, needs a debt drop for accepted.
 
+Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
+- `skip_exit = 77` (int or list, any tier kind): a run of the tier (base or head) exiting with one
+  of these codes fails the tier with "not run (exit 77)"; in the self-test that is outcome
+  `error`, never a detection.
+- `fail_regex` (any tier kind): a Python regex searched (re.MULTILINE) in the output of every run
+  of the tier, base and head (not the logged command line). A match fails the tier with "output
+  matched fail_regex: <first matching line, 120 chars>"; in the self-test it is outcome `error`.
+  Use it for ctest, which exits 0 when tests are skipped. A failing base run is not cached.
+- kind `findings` (keys cmd, format = "gcc", ignore_exit = true, timeout, cadence, modes,
+  skip_exit, fail_regex): runs cmd in the tree of `--base` (not ref_base) and at head, parses
+  `file:line:col: warning|error: ... [check]` lines (gcc, clang, clang-tidy), maps file paths to
+  tree-relative ones (outside the tree: `external:<path>`) and counts unique (file, line, col,
+  check) per (file, check); base paths of renamed files are mapped to head. Fails when any count
+  rises ("findings rose: path [check] 3 -> 5", up to 10), else "base N, head M". With
+  ignore_exit = false a nonzero exit fails. Base findings are cached in
+  `<git-common-dir>/codehealth/cache/<base sha>/<tier>/findings.json` keyed by cmd and env.
+  Not a behaviour tier: the self-test skips it.
+- kind `convergence` (keys cmd, outputs = [one file], order, band = [lo, hi], last): head only;
+  the output holds `h error` lines (# comments) for successive refinements; observed orders
+  p_i = log(e_i / e_{i+1}) / log(h_i / h_{i+1}); the last `last` of them (default all) must lie
+  in band. Fewer than 2 levels, non-positive or non-finite values fail. Detail
+  "orders 1.97 2.01 (band 1.8..2.2)". Skipped by the self-test.
+
+Static check `flags` (decision 14: compiler and threading flags are human decisions): on when the
+config has a C++ profile or `[gate] flags = true` (`flags = false` switches it off). Scans the
+added and removed lines (base..worktree) of touched CMakeLists.txt, *.cmake, CMake(User)Presets.json,
+meson.build, Makefile, *.mk, setup.py, pyproject.toml and C/C++/CUDA sources and headers for
+FP-semantics, ISA and thread-count flags (-ffast-math, -Ofast, -ffp-contract, -march=, -mavx,
+`#pragma omp ... num_threads`, `#pragma GCC optimize`, ...; see FLAG_PATTERNS), in build files also
+any line with CMAKE_{C,CXX,CUDA}_FLAGS, add_compile_options, target_compile_options or
+CMAKE_BUILD_TYPE, plus `[gate] flag_patterns` (regexes). Comments are not exempt. Detail: up to 10
+`path:line: +line` / `-line` entries.
+
 `codehealth config --check [--config FILE]` validates the config (unknown keys, tier kinds,
 required keys, tolerance keys, thread pins, one primary benchmark, cadence and modes, and the
 `[architecture]` table).

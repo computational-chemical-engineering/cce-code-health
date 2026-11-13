@@ -194,6 +194,60 @@ review-reject requires the revert to be committed (HEAD's tree equals `head_tree
 Non-revert records carry `reverts` = [].
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
+### Build-tool tiers (C++)
+
+For CMake/ctest suites such as Peclet:
+
+```toml
+[profiles]
+cpp = "cpp@0"                       # also switches the `flags` static check on
+[gate]
+flag_patterns = ["EIGEN_DONT_VECTORIZE"]   # optional extra regexes for the flags check
+[gate.env]
+OMP_NUM_THREADS = "1"
+[[gate.tier]]
+name = "build"
+cmd = "cmake -S . -B build-ch -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake --build build-ch -j8"
+[[gate.tier]]
+name = "ctest"
+cmd = "ctest --test-dir build-ch --output-on-failure"
+skip_exit = 77                      # a test that cannot run is "not run", never a pass
+fail_regex = '\*\*\*Skipped|Not Run|SKIPPED'   # ctest exits 0 when tests are skipped
+[[gate.tier]]
+name = "tidy"
+kind = "findings"                   # ratchet: no (file, check) may gain findings
+cmd = "cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null && run-clang-tidy -quiet -p build-tidy"
+cadence = "campaign"
+[[gate.tier]]
+name = "order"
+kind = "convergence"                # head only: observed order of accuracy within band
+cmd = "build-ch/bin/refine --out {out}/conv.txt"
+outputs = ["conv.txt"]
+order = 2.0
+band = [1.8, 2.2]
+last = 2
+```
+
+- `skip_exit` and `fail_regex` work on every tier kind and on every run of it (base and head).
+  A match fails the tier ("not run (exit 77)", "output matched fail_regex: <line>") and counts
+  as an error, not a detection, in the self-test.
+- `findings` runs `cmd` in the tree of `--base` (the last accepted step) and at head, parses
+  `file:line:col: warning|error: ... [check]` (gcc, clang with `-fdiagnostics-show-option`,
+  clang-tidy), maps absolute paths in either tree to repo-relative ones (others become
+  `external:<path>`), follows renames, and fails when any (file, check) count rises, listing
+  `path [check] 3 -> 5`. `ignore_exit` (default true) because clang-tidy exits nonzero when it
+  finds something. The base tree is cleaned before each use, so `cmd` must configure its own
+  build directory; base findings are cached per base sha, tier and cmd.
+- `convergence` reads `h error` lines from its single output and requires the observed orders
+  `log(e_i/e_{i+1}) / log(h_i/h_{i+1})` (the last `last`, default all) to lie in `band`.
+- Static check `flags` (on with a C++ profile or `[gate] flags = true`, off with `flags = false`):
+  compiler, floating-point and threading flags are human decisions, never part of a step. Added
+  or removed lines in touched build files (CMakeLists.txt, *.cmake, CMake presets, meson.build,
+  Makefile, *.mk, setup.py, pyproject.toml) and C/C++/CUDA sources that mention -ffast-math,
+  -Ofast, -ffp-contract, -march=, -mavx, `#pragma omp ... num_threads`, `#pragma GCC optimize`
+  and similar fail; in build files also any line with CMAKE_CXX_FLAGS, add_compile_options,
+  target_compile_options or CMAKE_BUILD_TYPE. Comments are not exempt.
+
 ### Architecture rules
 
 ```toml
