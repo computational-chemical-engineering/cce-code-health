@@ -33,6 +33,8 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - architecture: `codehealth coupling` (test pairs dropped), LCOM4 informational, `[architecture]` layers/forbid/cycles ratchet (`codehealth arch`, diff, gate), change class restructure (plan at base);
 - Peclet prep: cpp@0 (lizard) + `[profiles] cpp`; docs/adopters/peclet.md; counterpart session peclet_health on SMM-TRS2 (/home/frankp/Codes/suite): first target dem; it runs all builds; send it the install command after push.
 - C++ gate: skip_exit/fail_regex, findings tier (clang-tidy/warnings ratchet), flags static check (decision 14), convergence tier; scan/hotspots --config for read-only trials.
+- dem scan done by peclet_health (debt 1939, 12 brain). Fixes: 4a092f16 cpp@0 binding tables (NB_MODULE etc.) carry no length debt and are never brain; 8a10c858 `coupling --config`. Agreed order: demSolveContacts phases, launcher parameter structs, colouring dedup; *Kokkos renames before CB.
+- OpenFlowsheet S17 pinned at 8a10c858 (scan at CB bit-identical), WO-2 binding.py 134.2 -> 43.6, application/ 855.0 -> 683.5. Its feedback: `log --result accepted-neutral --reason` (no-gain step gated without --require-gain) and `log --head SHA` (late logging), 222 tests.
 - Next: peclet_health trial-scans dem and measures build/ctest/state_hash times, then I draft dem's config. Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 

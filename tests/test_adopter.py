@@ -225,3 +225,73 @@ def test_log_optimize_accepted_without_debt_drop(drepo):
     assert log(drepo, "o.json", "--result", "accepted") == 0
     rec = json.loads((drepo / ".git/codehealth/runs/c1.jsonl").read_text())
     assert rec["class"] == "optimize" and rec["result"] == "accepted"
+
+
+def test_log_accepted_neutral(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(9) + "# names and docstrings\n")
+    rc, d = gjson(drepo)                                   # no --require-gain: passes without gain
+    assert rc == 0
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "review note")
+    assert log(drepo, "g.json", "--result", "accepted") == 2          # no gain
+    assert "accepted-neutral" in capsys.readouterr().err
+    assert log(drepo, "g.json", "--result", "accepted-neutral") == 2  # needs reason
+    assert log(drepo, "g.json", "--result", "accepted-neutral", "--reason", "review 2 names") == 0
+    rec = json.loads((drepo / ".git/codehealth/runs/c1.jsonl").read_text())
+    assert rec["result"] == "accepted-neutral" and rec["head_sha"] == sha(drepo)
+    assert rec["reason"] == "review 2 names"
+
+
+def test_log_accepted_neutral_refused_with_gain_check_or_optimize(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(9) + "# c\n")
+    rc, d = gjson(drepo, "--require-gain")
+    assert rc == 1                                         # gain check failed
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    for c in d["checks"]:
+        c["ok"] = True                                     # even an all-ok JSON with a gain check
+    (drepo.parent / "g2.json").write_text(json.dumps(d))
+    assert log(drepo, "g2.json", "--result", "accepted-neutral", "--reason", "x") == 2
+    assert "without --require-gain" in capsys.readouterr().err
+    rc, d = gjson(drepo, name="g3.json")
+    d["meta"]["mode"] = "optimize"
+    (drepo.parent / "g3.json").write_text(json.dumps(d))
+    assert log(drepo, "g3.json", "--result", "accepted-neutral", "--reason", "x") == 2
+
+
+def test_log_head_sha_after_later_commit(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(8))
+    rc, d = gjson(drepo)
+    assert rc == 0
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    step = sha(drepo)
+    (drepo / "NOTES.md").write_text("docs after the gate\n")
+    git(drepo, "add", "NOTES.md")
+    git(drepo, "commit", "-qm", "docs")
+    assert log(drepo, "g.json") == 2                       # inferred accepted: HEAD differs
+    err = capsys.readouterr().err
+    assert "--head SHA" in err
+    assert log(drepo, "g.json", "--head", sha(drepo)) == 2           # wrong tree
+    assert log(drepo, "g.json", "--head", step) == 0
+    rec = json.loads((drepo / ".git/codehealth/runs/c1.jsonl").read_text())
+    assert rec["result"] == "accepted" and rec["head_sha"] == step
+
+
+def test_log_head_must_be_ancestor(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(8))
+    rc, d = gjson(drepo)
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    step = sha(drepo)
+    git(drepo, "reset", "-q", "--hard", "HEAD~1")          # step dropped: no longer on the branch
+    assert log(drepo, "g.json", "--head", step) == 2
+    assert "not an ancestor" in capsys.readouterr().err
+
+
+def test_log_head_refused_for_gate_fail(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(10))
+    rc, _ = gjson(drepo)
+    assert rc == 1
+    assert log(drepo, "g.json", "--head", "HEAD") == 2
+    assert "--head is only for" in capsys.readouterr().err

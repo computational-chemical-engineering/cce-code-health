@@ -175,7 +175,11 @@ codehealth log --gate-json g.json --campaign c1 --target src/a.py::f --recipe ex
 `codehealth log` appends one validated JSON line to `<git-common-dir>/codehealth/runs/<campaign>.jsonl`
 (`--out` overrides). The result is inferred (gate-fail, accepted, no-gain; in optimize mode all checks
 ok means accepted) or given with `--result` (also review-reject, which needs `--reason`); an accepted
-step must be committed first (HEAD's tree must equal the gate's `head_tree`). Trial and self-test JSONs
+step must be committed first (HEAD's tree must equal the gate's `head_tree`; `--head SHA` names an
+earlier commit on the branch instead, for logging after a later docs commit). `--result
+accepted-neutral --reason <why>` records a kept refactor or restructure step without debt gain (for
+example names and docstrings from review notes): the gate JSON must come from a run without
+`--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
 and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
 For results other than accepted, `head_sha` is `meta.head` when it is a sha (a committed step that
 failed keeps its evidence), else null.

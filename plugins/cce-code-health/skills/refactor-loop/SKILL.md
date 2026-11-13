@@ -71,7 +71,11 @@ campaign is one of its work packages and follows those rules.
 7. **Log** every attempt, right after the gate (before any reset): `codehealth log
    --gate-json <gate.json> --campaign <id> --target <path::qualname> --recipe <id>
    [--model <name>]`. It infers `accepted`, `gate-fail` (with the tier) or `no-gain`, and
-   for an accepted step checks that HEAD's tree is the tree the gate judged.
+   for an accepted step checks that HEAD's tree is the tree the gate judged (`--head <step sha>`
+   when a later commit already sits on top).
+   A deliberate step without gain (names, docstrings or comments from review notes) is gated
+   without `--require-gain` and logged with `--result accepted-neutral --reason <review note>`.
+   It is never a recipe step: it does not count as an accept in playbook statistics.
    **Never write log lines by hand.** The log lives outside the working tree during the
    campaign (the gate rejects any change under `.codehealth/` in a step):
    `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it
@@ -108,7 +112,7 @@ instead.
 
 ## Playbook consolidation (every ~10 attempts)
 
-Compute per recipe: attempts, accepts, gate-fails, review-rejects, median debt reduction,
+Compute per recipe: attempts, accepts (`accepted` only), gate-fails, review-rejects, median debt reduction,
 from the run logs with a short script (never from memory). Update `.codehealth/playbook.md`:
 - **Rules for new code** (at most 10 bullets): the lessons ordinary coding agents must
   follow so the debt does not come back (e.g. "keep functions under cognitive 15; extract

@@ -292,7 +292,8 @@ def cmd_gate(a) -> int:
     return 1 if failed else 3 if a.config else 0
 
 
-RESULTS = ("accepted", "gate-fail", "no-gain", "review-reject")
+RESULTS = ("accepted", "accepted-neutral", "gate-fail", "no-gain", "review-reject")
+KEPT = ("accepted", "accepted-neutral")   # results whose commit stays: must be committed
 
 
 def _infer_result(checks: list, mode: str, before: float, after: float) -> str:
@@ -321,10 +322,10 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
         if not a.reason:
             raise ValueError("a revert gate JSON needs --reason")
     else:
-        if a.result == "review-reject" and not a.reason:
-            raise ValueError("--result review-reject needs --reason")
-        if a.reason and a.result != "review-reject":
-            raise ValueError("--reason is only for --result review-reject")
+        if a.result in ("review-reject", "accepted-neutral") and not a.reason:
+            raise ValueError(f"--result {a.result} needs --reason")
+        if a.reason and a.result not in ("review-reject", "accepted-neutral"):
+            raise ValueError("--reason is only for --result review-reject or accepted-neutral")
     checks = data["checks"]
     failed = [c for c in checks if not c["ok"]]
     gained = meta_["mode"] == "optimize" or meta_["debt_after"] < meta_["debt_before"] - EPS
@@ -337,8 +338,33 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
     if result != "gate-fail" and failed:
         raise ValueError(f"--result {result} but check {failed[0]['name']} failed in the gate JSON")
     if result == "accepted" and not gained:
-        raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']})")
+        raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']}); "
+                         "a deliberate step without gain (gated without --require-gain) is accepted-neutral")
+    if result == "accepted-neutral":
+        if meta_["mode"] == "optimize":
+            raise ValueError("--result accepted-neutral is for refactor and restructure; optimize uses accepted")
+        if meta_.get("require_gain") or any(c["name"] == "gain" for c in checks):
+            raise ValueError("--result accepted-neutral needs a gate run without --require-gain")
+        if meta_["debt_after"] > meta_["debt_before"] + EPS:
+            raise ValueError(f"--result accepted-neutral but debt rose ({meta_['debt_before']} -> {meta_['debt_after']})")
     return checks, meta_, result
+
+
+def _logged_commit(repo: Path, head: str | None, m: dict) -> str:
+    """The commit that carries the judged tree: HEAD, or --head SHA (an ancestor of HEAD, for late logging)."""
+    name = head or "HEAD"
+    sha = gitio.rev(repo, name)
+    tree = gitio.git(repo, "rev-parse", f"{sha}^{{tree}}").decode().strip()
+    if tree != m["head_tree"]:
+        hint = "" if head else "; commit the gated change first, or name the step commit with --head SHA"
+        raise ValueError(f"{name}'s tree differs from the tree the gate judged "
+                         f"({name} {tree[:10]}, gate {m['head_tree'][:10]}){hint}")
+    if head:
+        try:
+            gitio.git(repo, "merge-base", "--is-ancestor", sha, "HEAD")
+        except gitio.GitError:
+            raise ValueError(f"--head {head} is not an ancestor of HEAD: the step is not on this branch") from None
+    return sha
 
 
 def cmd_log(a) -> int:
@@ -348,14 +374,13 @@ def cmd_log(a) -> int:
     checks, m, result = _check_log_args(a, data)
     reverts = list(m.get("revert") or [])
     head_sha = m.get("head") if re.fullmatch(r"[0-9a-f]{40}", str(m.get("head"))) else None
-    if result == "accepted" or (reverts and result == "review-reject"):
-        head_tree = gitio.git(repo, "rev-parse", "HEAD^{tree}").decode().strip()
-        if head_tree != m["head_tree"]:
-            raise ValueError("HEAD's tree differs from the tree the gate judged: commit the gated change "
-                             f"first (HEAD {head_tree[:10]}, gate {m['head_tree'][:10]})")
-        if result == "accepted" and head_tree == gitio.git(repo, "rev-parse", f"{m['base']}^{{tree}}").decode().strip():
-            raise ValueError("HEAD's tree equals the base's tree: nothing was committed")
-        head_sha = gitio.rev(repo, "HEAD")
+    if result in KEPT or (reverts and result == "review-reject"):
+        head_sha = _logged_commit(repo, a.head, m)
+        tree = gitio.git(repo, "rev-parse", f"{head_sha}^{{tree}}").decode().strip()
+        if result in KEPT and tree == gitio.git(repo, "rev-parse", f"{m['base']}^{{tree}}").decode().strip():
+            raise ValueError(f"{a.head or 'HEAD'}'s tree equals the base's tree: nothing was committed")
+    elif a.head:
+        raise ValueError(f"--head is only for kept results ({', '.join(KEPT)}) and committed reverts")
     out = (Path(a.out) if a.out else gatemod._common_dir(repo) / "runs" / f"{a.campaign}.jsonl").resolve()
     lines = [ln for ln in out.read_text().splitlines() if ln.strip()] if out.is_file() else []
     for ln in lines:
@@ -447,7 +472,9 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--target", required=True, help="path::qualname")
     pl.add_argument("--recipe", required=True)
     pl.add_argument("--result", choices=RESULTS, help="default: inferred from the gate JSON")
-    pl.add_argument("--reason", help="required for --result review-reject and for revert gate JSONs")
+    pl.add_argument("--reason", help="required for --result review-reject, accepted-neutral and revert gate JSONs")
+    pl.add_argument("--head", help="the commit that carries the judged tree (default HEAD); must be an "
+                    "ancestor of HEAD, for logging after later commits")
     pl.add_argument("--model")
     pl.add_argument("--hypothesis")
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")
