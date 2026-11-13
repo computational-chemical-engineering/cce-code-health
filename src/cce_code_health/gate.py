@@ -139,6 +139,7 @@ tiers: rc; reference tiers: rc of the head run).
 from __future__ import annotations
 
 import ast
+import difflib
 import json
 import math
 import os
@@ -346,6 +347,9 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         fail, gain = arch
         checks.append(Check("architecture", not fail, "; ".join((fail + gain)[:5])
                             + (f"; +{len(fail + gain) - 5} more" if len(fail + gain) > 5 else "")))
+    flags = flags_check(repo, base, cfg, changes)
+    if flags is not None:
+        checks.append(flags)
     checks.append(numeric_literals(py, tb, th))
     return checks
 
@@ -376,6 +380,59 @@ def numeric_literals(py, tb: dict, th: dict) -> Check:
     if len(entries) > 10:
         detail += f"; +{len(entries) - 10} more"
     return Check("numeric-literals", True, detail)
+
+
+# -- static check flags (decision 14: compiler and threading flags are human decisions) ------
+
+FLAG_PATTERNS = [re.escape(f) for f in (
+    "-ffast-math", "-Ofast", "-funsafe-math-optimizations", "-fassociative-math", "-freciprocal-math",
+    "-ffinite-math-only", "-fno-signed-zeros", "-ffp-contract", "-march=", "-mtune=", "-mfma", "-mavx",
+    "omp_set_num_threads")] + [
+    r"#\s*pragma\s+omp\b.*\bnum_threads", r"#\s*pragma\s+GCC\s+optimize", r"__attribute__\s*\(\(\s*optimize",
+    r"#\s*pragma\s+STDC\s+FP_CONTRACT", r"#\s*pragma\s+clang\s+fp\b"]
+BUILD_FLAG_PATTERNS = [r"CMAKE_CXX_FLAGS", r"CMAKE_C_FLAGS", r"CMAKE_CUDA_FLAGS", r"add_compile_options",
+                       r"target_compile_options", r"CMAKE_BUILD_TYPE"]
+BUILD_NAMES = {"CMakeLists.txt", "CMakePresets.json", "CMakeUserPresets.json", "meson.build", "Makefile",
+               "setup.py", "pyproject.toml"}
+BUILD_SUFFIXES = (".cmake", ".mk")
+SOURCE_SUFFIXES = {s for s, lang in config.EXTENSIONS.items() if lang == "cpp"} | {".c"}
+
+
+def flags_active(cfg: config.Config) -> bool:
+    """On with a C++ profile or `[gate] flags = true`; `flags = false` switches it off."""
+    return bool(cfg.gate.get("flags", "cpp" in cfg.other_profiles))
+
+
+def _diff_lines(old: str, new: str):
+    """(sign, line number, text) of removed (base numbering) and added (head numbering) lines."""
+    a, b = old.splitlines(), new.splitlines()
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag in ("replace", "delete"):
+            yield from (("-", i + 1, a[i]) for i in range(i1, i2))
+        if tag in ("replace", "insert"):
+            yield from (("+", j + 1, b[j]) for j in range(j1, j2))
+
+
+def flags_check(repo: Path, base: str, cfg: config.Config, changes) -> Check | None:
+    """Fail on added or removed lines that set compiler, FP or threading flags (None if inactive)."""
+    if not flags_active(cfg):
+        return None
+    common = [re.compile(p) for p in FLAG_PATTERNS + list(cfg.gate.get("flag_patterns", []))]
+    build_only = [re.compile(p) for p in BUILD_FLAG_PATTERNS]
+    hits = []
+    for _, bp, hp in changes:
+        path = hp or bp
+        names = {Path(p).name for p in (bp, hp) if p}
+        build = bool(names & BUILD_NAMES) or any(n.endswith(BUILD_SUFFIXES) for n in names)
+        if not build and not any(Path(n).suffix in SOURCE_SUFFIXES for n in names):
+            continue
+        old = gitio.read_files(repo, base, [bp]).get(bp, "") if bp else ""
+        new = (repo / hp).read_text(encoding="utf-8", errors="replace") if hp and (repo / hp).is_file() else ""
+        pats = common + (build_only if build else [])
+        hits += [f"{path}:{no}: {sign}{line.strip()}" for sign, no, line in _diff_lines(old, new)
+                 if any(rx.search(line) for rx in pats)]
+    more = f"; +{len(hits) - 10} more" if len(hits) > 10 else ""
+    return Check("flags", not hits, "; ".join(h[:160] for h in hits[:10]) + more)
 
 
 def _selected(cfg: config.Config, cadence: str, mode: str, gitdir: Path | None = None) -> list[dict]:
@@ -511,9 +568,9 @@ def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
     for _ in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
         try:
-            rc, _ = _run(_fill(t["cmd"], repo=str(tree), base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base,
-                                files=ctx.files, out=str(out)),
-                         tree, ctx.env, ctx.log, timeout)
+            rc, _, _ = _run_checked(t, _fill(t["cmd"], repo=str(tree), base=ctx.ref_base,
+                                             ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out=str(out)),
+                                    tree, ctx.env, ctx.log, timeout)
             if rc != 0:
                 return None, f"exit {rc} at base", []
             runs.append(_outputs(out, names))
@@ -583,7 +640,8 @@ def unexecuted_changes(ctx: Ctx, executed: dict[str, set[int]]) -> list[str]:
     return bad
 
 
-def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout) -> tuple[int, dict[str, set[int]]]:
+def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout,
+                 t: dict | None = None) -> tuple[int, dict[str, set[int]]]:
     """Run cmd with coverage.py measuring every Python (sub)process; executed lines by real path."""
     tmp = Path(tempfile.mkdtemp(prefix="codehealth-cov-"))
     try:
@@ -597,7 +655,7 @@ def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout) -> tuple[int, dic
         old = env.get("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
         cenv = {**env, "PYTHONPATH": str(tmp / "site") + (os.pathsep + old if old else ""),
                 "COVERAGE_PROCESS_START": str(rc_file)}
-        rc, _ = _run(cmd, cwd, cenv, log, timeout)
+        rc, _, _ = _run_checked(t or {}, cmd, cwd, cenv, log, timeout)
         executed: dict[str, set[int]] = {}
         try:
             import coverage  # noqa: PLC0415
@@ -628,9 +686,9 @@ def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
                     files=ctx.files, out=str(out))
         try:
             if i == 0 and t.get("coverage", False):
-                rc, executed = _run_covered(cmd, ctx.repo, ctx.env, ctx.log, timeout)
+                rc, executed = _run_covered(cmd, ctx.repo, ctx.env, ctx.log, timeout, t)
             else:
-                rc, _ = _run(cmd, ctx.repo, ctx.env, ctx.log, timeout)
+                rc, _, _ = _run_checked(t, cmd, ctx.repo, ctx.env, ctx.log, timeout)
             if rc != 0:
                 return False, f"exit {rc} at head", rc
             runs.append(_outputs(out, names))
@@ -670,8 +728,9 @@ def _bench_run(t, cwd, base, files, env, log) -> tuple[int, float, float, str]:
     try:
         before = _status(cwd)
         r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
-        rc, sec = _run(_fill(t["cmd"], repo=str(cwd), base=base, ref_base=base, files=files, out=""), cwd,
-                       {**env, "TMPDIR": tmp, "XDG_CACHE_HOME": cache}, log, t.get("timeout"))
+        rc, sec, _ = _run_checked(t, _fill(t["cmd"], repo=str(cwd), base=base, ref_base=base, files=files,
+                                           out=""), cwd,
+                                  {**env, "TMPDIR": tmp, "XDG_CACHE_HOME": cache}, log, t.get("timeout"))
         r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu = (r1.ru_utime + r1.ru_stime) - (r0.ru_utime + r0.ru_stime)
         note = "benchmark wrote into the tree" if _status(cwd) != before else ""
@@ -767,6 +826,180 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
             _bench_detail(r, times, cpu) + f", max slowdown {allowed:.0%}")
 
 
+# -- build-tool tiers (C++): skip_exit, fail_regex, findings, convergence ---------------------
+
+NOT_RUN = "not run"
+FAIL_REGEX = "output matched fail_regex"
+
+
+class TierProblem(Exception):
+    """A run that fails its tier whatever the kind: skip_exit, fail_regex, or a findings exit."""
+
+    def __init__(self, detail: str, rc: int | None):
+        super().__init__(detail)
+        self.detail, self.rc = detail, rc
+
+
+def skip_codes(t: dict) -> list[int]:
+    v = t.get("skip_exit")
+    return [] if v is None else [v] if isinstance(v, int) else list(v)
+
+
+def _run_checked(t: dict, cmd: str, cwd: Path, env: dict, log, timeout) -> tuple[int, float, str]:
+    """`_run` plus the tier's skip_exit and fail_regex: (rc, seconds, this run's output).
+    The output is the segment `_run` appended to the log file, without its header and exit line."""
+    log.flush()
+    start = os.fstat(log.fileno()).st_size
+    rc, sec = _run(cmd, cwd, env, log, timeout)
+    log.flush()
+    with open(log.name, "rb") as f:
+        f.seek(start)
+        text = f.read().decode("utf-8", errors="replace")
+    header = f"\n$ (cwd {cwd}) {cmd}\n"   # as written by _run
+    text = text[len(header):] if text.startswith(header) else text
+    text = text[:-len(f"exit {rc}\n")] if text.endswith(f"exit {rc}\n") else text
+    if rc in skip_codes(t):
+        raise TierProblem(f"{NOT_RUN} (exit {rc})", rc)
+    if t.get("fail_regex"):
+        m = re.search(t["fail_regex"], text, re.MULTILINE)
+        if m:
+            end = text.find("\n", m.start())
+            line = text[text.rfind("\n", 0, m.start()) + 1:end if end >= 0 else len(text)].strip()
+            raise TierProblem(f"{FAIL_REGEX}: {line[:120]}", rc)
+    return rc, sec, text
+
+
+FINDING_FORMATS = {
+    # gcc and clang warnings with -fdiagnostics-show-option, and clang-tidy
+    "gcc": re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+):(?P<col>\d+): (?:warning|error): "
+                      r".*?\[(?P<check>[^\]]+)\]\s*$", re.MULTILINE),
+}
+
+
+def _tree_path(path: str, root: Path) -> str:
+    """Repo-relative path of a reported file; files outside the tree keep their path as
+    `external:<path>`."""
+    full = Path(path) if os.path.isabs(path) else root / path
+    for r in (Path(os.path.realpath(root)), Path(os.path.normpath(root))):
+        for p in (Path(os.path.realpath(full)), Path(os.path.normpath(full))):
+            try:
+                return p.relative_to(r).as_posix()
+            except ValueError:
+                pass
+    return "external:" + os.path.normpath(path)
+
+
+def parse_findings(text: str, root: Path, fmt: str = "gcc") -> set[tuple[str, int, int, str]]:
+    """Unique (file, line, col, check) in a tool's output, file relative to root."""
+    return {(_tree_path(m["file"], root), int(m["line"]), int(m["col"]), m["check"])
+            for m in FINDING_FORMATS[fmt].finditer(text)}
+
+
+def _findings_run(t, tree: Path, ctx: Ctx, side: str) -> tuple[set, int]:
+    cmd = _fill(t["cmd"], repo=str(tree), base=ctx.base, ref_base=ctx.ref_arg or ctx.ref_base,
+                files=ctx.files, out="")
+    rc, _, text = _run_checked(t, cmd, tree, ctx.env, ctx.log, t.get("timeout"))
+    if rc and not t.get("ignore_exit", True):
+        raise TierProblem(f"exit {rc} at {side}", rc)
+    return parse_findings(text, tree, t.get("format", "gcc")), rc
+
+
+def _base_findings(t, ctx: Ctx) -> set:
+    """Findings in the tree of `base` (last accepted step), cached per (sha, tier, cmd, env)."""
+    key = {"kind": "findings", "env": ctx.env, "format": t.get("format", "gcc"),
+           "ignore_exit": t.get("ignore_exit", True),
+           "cmd": _fill(t["cmd"], repo="<repo>", base=ctx.base, ref_base=ctx.ref_arg or ctx.ref_base,
+                        files=ctx.files, out="")}
+    cache = _cache_dir(ctx.repo, ctx.base, t["name"]) / "findings.json"
+    try:
+        data = json.loads(cache.read_text())
+        if data.get("key") == key:
+            ctx.log.write(f"\n(findings cache hit: {cache})\n")
+            return {tuple(f) for f in data["findings"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    found, _ = _findings_run(t, base_tree(ctx.repo, ctx.base, keep=(ctx.ref_base,)), ctx, "base")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"key": key, "findings": sorted(found)}))
+    return found
+
+
+def _findings(t, ctx: Ctx) -> tuple[bool, str, int | None]:
+    """Ratchet: no (file, check) may have more unique findings at head than at base."""
+    base = _base_findings(t, ctx)
+    head, rc = _findings_run(t, ctx.repo, ctx, "head")
+    renamed = {bp: hp for _, bp, hp in ctx.changes if bp and hp and bp != hp}
+    cb = Counter((renamed.get(f, f), c) for f, _, _, c in base)
+    ch = Counter((f, c) for f, _, _, c in head)
+    rises = sorted(k for k in ch if ch[k] > cb[k])
+    totals = f"base {len(base)}, head {len(head)}"
+    if not rises:
+        return True, totals, rc
+    items = [f"{f} [{c}] {cb[(f, c)]} -> {ch[(f, c)]}" for f, c in rises]
+    more = f" (+{len(items) - 10} more)" if len(items) > 10 else ""
+    return False, "findings rose: " + "; ".join(items[:10]) + more + f"; {totals}", rc
+
+
+def observed_orders(levels: list[tuple[float, float]]) -> tuple[list[float], str]:
+    """p_i = log(e_i / e_{i+1}) / log(h_i / h_{i+1}) for successive (h, e); ([], why) if invalid."""
+    if len(levels) < 2:
+        return [], f"need at least 2 levels, got {len(levels)}"
+    for i, (h, e) in enumerate(levels, 1):
+        if not (math.isfinite(h) and math.isfinite(e)):
+            return [], f"level {i}: non-finite value ({h!r}, {e!r})"
+        if h <= 0 or e <= 0:
+            return [], f"level {i}: non-positive value ({h!r}, {e!r})"
+    orders = []
+    for (h0, e0), (h1, e1) in zip(levels, levels[1:]):
+        if h0 == h1:
+            return [], f"equal h {h0!r} on successive levels"
+        orders.append(math.log(e0 / e1) / math.log(h0 / h1))
+    return orders, ""
+
+
+def _read_levels(text: str) -> tuple[list[tuple[float, float]], str]:
+    levels = []
+    for no, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        try:
+            if len(parts) != 2:
+                raise ValueError
+            levels.append((float(parts[0]), float(parts[1])))
+        except ValueError:
+            return [], f"line {no}: expected 'h error', got {raw.strip()!r}"
+    return levels, ""
+
+
+def _convergence(t, ctx: Ctx) -> tuple[bool, str, int | None]:
+    """Head only: the observed orders (the last `last` of them) must lie within `band`."""
+    out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
+    try:
+        cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.base, ref_base=ctx.ref_arg or ctx.ref_base,
+                    files=ctx.files, out=str(out))
+        rc, _, _ = _run_checked(t, cmd, ctx.repo, ctx.env, ctx.log, t.get("timeout"))
+        if rc:
+            return False, f"exit {rc} at head", rc
+        name = t["outputs"][0]
+        if not (out / name).is_file():
+            return False, f"missing output: {name}", rc
+        levels, why = _read_levels((out / name).read_text(errors="replace"))
+    finally:
+        shutil.rmtree(out, ignore_errors=True)
+    orders, why = observed_orders(levels) if not why else ([], why)
+    if why:
+        return False, why, rc
+    lo, hi = (float(x) for x in t["band"])
+    last = int(t.get("last", len(orders)))
+    shown = " ".join(f"{p:.2f}" for p in orders)
+    band = f"band {lo:g}..{hi:g}" + (f", last {last} checked" if "last" in t else "")
+    if all(lo <= p <= hi for p in orders[-last:]):
+        return True, f"orders {shown} ({band})", rc
+    return False, f"orders {shown} outside {band}", rc
+
+
 def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, log,
               mode: str = "refactor", keep_going: bool | None = None,
               kinds: tuple | None = None, ref_base: str | None = None,
@@ -783,23 +1016,33 @@ def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, 
         name, kind, t0 = t["name"], t.get("kind", "command"), time.monotonic()
         if (kinds and kind not in kinds) or (only is not None and name not in only):
             continue
-        if kind == "command":
-            rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, ref_base=ctx.ref_arg or ctx.ref_base,
-                               files=files, out=""),
-                         repo, env, log, t.get("timeout"))
-            ok, detail, exit_code = rc == 0, (f"exit {rc}" if rc else ""), rc
-        elif kind == "reference":
-            ok, detail, exit_code = _reference(t, ctx, get_tree)
-        elif kind == "benchmark":
-            ok, detail = _benchmark(t, ctx, get_tree)
-            exit_code = None
-        else:
-            raise ValueError(f"tier {name}: unknown kind {kind!r}")
+        try:
+            ok, detail, exit_code = _dispatch(t, kind, ctx, get_tree)
+        except TierProblem as exc:   # skip_exit or fail_regex in any run of the tier
+            ok, detail, exit_code = False, exc.detail, exc.rc
         checks.append(Check(name, ok, detail, time.monotonic() - t0, exit_code))
         log.write(f"--- tier {name}: {'PASS' if ok else 'FAIL'} {detail}\n")
         if not ok and not keep_going:
             break
     return checks
+
+
+def _dispatch(t, kind: str, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
+    """Run one tier of any kind: (ok, detail, exit code)."""
+    if kind == "command":
+        rc, _, _ = _run_checked(t, _fill(t["cmd"], repo=str(ctx.repo), base=ctx.base,
+                                         ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out=""),
+                                ctx.repo, ctx.env, ctx.log, t.get("timeout"))
+        return rc == 0, (f"exit {rc}" if rc else ""), rc
+    if kind == "reference":
+        return _reference(t, ctx, get_tree)
+    if kind == "benchmark":
+        return (*_benchmark(t, ctx, get_tree), None)
+    if kind == "findings":
+        return _findings(t, ctx)
+    if kind == "convergence":
+        return _convergence(t, ctx)
+    raise ValueError(f"tier {t['name']}: unknown kind {kind!r}")
 
 
 def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> tuple[Check, float, float]:
@@ -979,6 +1222,8 @@ def _self_test_result(c: Check, t: dict, baseline_rc: int | None) -> Check:
     rc = c.exit_code
     if c.ok:
         outcome, detail = "missed", c.detail
+    elif c.detail.startswith((NOT_RUN, FAIL_REGEX)):   # skipped or not run is never a detection
+        outcome, detail = "error", c.detail
     elif allowed and rc not in (None, 0) and rc not in allowed:
         outcome, detail = "error", f"exit {rc} not in detect_exit {list(allowed)}"
     else:
