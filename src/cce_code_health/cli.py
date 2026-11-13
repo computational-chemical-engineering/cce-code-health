@@ -203,7 +203,7 @@ def cmd_hotspots(a) -> int:
 
 def cmd_coupling(a) -> int:
     repo = Path(a.repo).resolve()
-    cfg = config.load(repo, None)
+    cfg = _load(a, repo, None)
     keep = {p for p in gitio.ls_files(repo, None) if cfg.in_scope(p)}
     commits, skipped = coupling.commit_file_sets(repo, a.since, a.max_files_per_commit, keep.__contains__)
     res = coupling.compute(commits, a.depth, a.min_shared, a.min_degree, a.include_test_pairs)
@@ -424,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--max-files-per-commit", type=int, default=30, help="skip larger commits (default 30)")
     pk.add_argument("--min-shared", type=int, default=5, help="min shared commits (default 5)")
     pk.add_argument("--min-degree", type=float, default=0.5, help="min coupling degree (default 0.5)")
+    pk.add_argument("--config", dest="trial_config",
+                    help="read-only trial: use this config file instead of the repo's")
     pk.add_argument("--include-test-pairs", action="store_true",
                     help="keep pairs of a test file with a non-test file (dropped by default)")
     pk.add_argument("--depth", type=int, help="module = first N directory components (default: whole directory)")

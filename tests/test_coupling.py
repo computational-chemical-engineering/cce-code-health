@@ -98,3 +98,29 @@ def test_test_pairs_dropped_by_default():
     assert pairs == {("src/a.py", "src/b.py")}
     pairs = {(p["a"], p["b"]) for p in compute(commits, None, 5, 0.5, include_test_pairs=True)["pairs"]}
     assert ("src/a.py", "tests/test_a.py") in pairs
+
+
+def test_coupling_trial_config_brings_cpp_in_scope(tmp_path):
+    pytest = __import__("pytest")
+    pytest.importorskip("lizard")
+    import json
+    import subprocess
+    from cce_code_health.cli import main
+    repo = tmp_path / "r"
+    repo.mkdir()
+    run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)  # noqa: E731
+    run("init", "-q")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "t")
+    for i in range(5):
+        for f in ("a.cpp", "b.hpp"):
+            (repo / f).write_text(f"// {i}\n")
+        run("add", "a.cpp", "b.hpp")
+        run("commit", "-qm", f"c{i}")
+    cfg = tmp_path / "t.toml"
+    cfg.write_text('schema = 1\n[profiles]\ncpp = "cpp@0"\n')
+    out = tmp_path / "c.json"
+    assert main(["coupling", "--repo", str(repo), "--json", str(out)]) == 0
+    assert json.loads(out.read_text())["pairs"] == []
+    assert main(["coupling", "--repo", str(repo), "--config", str(cfg), "--json", str(out)]) == 0
+    assert [(p["a"], p["b"]) for p in json.loads(out.read_text())["pairs"]] == [("a.cpp", "b.hpp")]
