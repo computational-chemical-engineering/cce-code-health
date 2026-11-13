@@ -109,10 +109,11 @@ TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architect
 HOOK_KEYS = {"enabled"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
-             "env", "tier"}
+             "env", "tier", "flags", "flag_patterns"}
 TIER_KEYS = {"name", "cadence", "kind", "cmd", "outputs", "tolerance", "timeout", "primary",
-             "min_speedup", "max_slowdown", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit"}
-KINDS = ("command", "reference", "benchmark")
+             "min_speedup", "max_slowdown", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit",
+             "skip_exit", "fail_regex", "format", "ignore_exit", "order", "band", "last"}
+KINDS = ("command", "reference", "benchmark", "findings", "convergence")
 THREAD_PINS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
 
@@ -175,6 +176,7 @@ def check(text: str) -> tuple[list[str], list[str]]:
         if de is not None and not (isinstance(de, list) and de and all(
                 isinstance(x, int) and not isinstance(x, bool) and x != 0 for x in de)):
             bad.append(f"{where}: detect_exit must be a non-empty list of nonzero integers, got {de!r}")
+        bad += _build_tier_problems(t, kind, where)
         if t.get("cadence", "step") not in ("step", "campaign"):
             bad.append(f"{where}: cadence must be step or campaign, got {t['cadence']!r}")
         bad += [f"{where}: modes entry {m!r} must be refactor or optimize"
@@ -186,9 +188,71 @@ def check(text: str) -> tuple[list[str], list[str]]:
         miss = [k for k in THREAD_PINS if k not in env]
         if miss:
             bad.append("benchmark tiers need [gate.env] to set " + ", ".join(miss))
+    bad += _flags_problems(gate)
     primaries = [t for t in benches if t.get("primary")]
     if any("min_speedup" in t for t in tiers) and len(primaries) != 1:
         bad.append(f"min_speedup is used: exactly one benchmark tier needs primary = true, found {len(primaries)}")
     elif len(primaries) > 1:
         bad.append(f"exactly one primary benchmark tier allowed, found {len(primaries)}")
     return info, bad
+
+
+def _regex_problem(rx, what: str) -> list[str]:
+    if not isinstance(rx, str):
+        return [f"{what} must be a string, got {rx!r}"]
+    try:
+        re.compile(rx)
+    except re.error as exc:
+        return [f"{what} is not a valid regex: {exc}"]
+    return []
+
+
+def _number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _build_tier_problems(t: dict, kind: str, where: str) -> list[str]:
+    """skip_exit and fail_regex (any kind), findings and convergence keys."""
+    bad = []
+    se = t.get("skip_exit")
+    ints = se if isinstance(se, list) else [se]
+    if se is not None and not (ints and all(isinstance(x, int) and not isinstance(x, bool) for x in ints)):
+        bad.append(f"{where}: skip_exit must be an integer or a non-empty list of integers, got {se!r}")
+    if "fail_regex" in t:
+        bad += _regex_problem(t["fail_regex"], f"{where}: fail_regex")
+    if kind == "findings":
+        if t.get("format", "gcc") != "gcc":
+            bad.append(f"{where}: format must be gcc, got {t['format']!r}")
+        if not isinstance(t.get("ignore_exit", True), bool):
+            bad.append(f"{where}: ignore_exit must be a bool, got {t['ignore_exit']!r}")
+    if kind == "convergence":
+        if not (isinstance(t.get("outputs"), list) and len(t["outputs"]) == 1):
+            bad.append(f"{where}: convergence tier needs exactly one output")
+        band = t.get("band")
+        if not (isinstance(band, list) and len(band) == 2 and all(_number(x) for x in band)
+                and band[0] < band[1]):
+            bad.append(f"{where}: band must be [lo, hi] with lo < hi, got {band!r}")
+        elif not _number(t.get("order")) or not band[0] <= t["order"] <= band[1]:
+            bad.append(f"{where}: order must be a number within band, got {t.get('order')!r}")
+        last = t.get("last")
+        if last is not None and not (isinstance(last, int) and not isinstance(last, bool) and last >= 1):
+            bad.append(f"{where}: last must be a positive integer, got {last!r}")
+    for k in ("format", "ignore_exit"):
+        if k in t and kind != "findings":
+            bad.append(f"{where}: {k} is only for findings tiers")
+    for k in ("order", "band", "last"):
+        if k in t and kind != "convergence":
+            bad.append(f"{where}: {k} is only for convergence tiers")
+    return bad
+
+
+def _flags_problems(gate: dict) -> list[str]:
+    bad = []
+    if "flags" in gate and not isinstance(gate["flags"], bool):
+        bad.append(f"[gate] flags must be a bool, got {gate['flags']!r}")
+    pats = gate.get("flag_patterns", [])
+    if not isinstance(pats, list):
+        return bad + [f"[gate] flag_patterns must be a list of regexes, got {pats!r}"]
+    for i, rx in enumerate(pats):
+        bad += _regex_problem(rx, f"[gate] flag_patterns[{i}]")
+    return bad

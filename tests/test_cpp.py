@@ -194,7 +194,7 @@ def test_diff_and_gate_static_rules_with_cpp(mixed, capsys):
                                                       ("A", None, "src/new.hpp")])
     assert {c.name: c.ok for c in checks} == {"frozen": True, "forbid": True, "scope": True,
                                               "literals": True, "public_api": True,
-                                              "numeric-literals": True}
+                                              "flags": True, "numeric-literals": True}
 
 
 def test_config_profiles_table():
