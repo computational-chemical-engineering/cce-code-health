@@ -117,8 +117,9 @@ Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
 - `same_lines` (reference tiers): a Python regex; the output lines of a run that match it, with
   the tree path replaced by `{repo}`, must be the same at base and head (sorted). For configure
   lines that name resolved dependencies or toolchains (`-- Found X: <path>`), so a base worktree
-  that silently fetched or found a different dependency fails ("same_lines differ"). Base lines
-  are cached with the base outputs; keep the configure output in the log (no `>/dev/null`).
+  that silently fetched or found a different dependency fails ("same_lines differ"). A regex that
+  matches no line on either side fails too (a guard that checks nothing). Base lines are cached
+  with the base outputs; keep the configure output in the log (no `>/dev/null`).
 - kind `findings` (keys cmd, format = "gcc", ignore_exit = true, timeout, cadence, modes,
   skip_exit, fail_regex): runs cmd in the tree of `--base` (not ref_base) and at head, parses
   `file:line:col: warning|error: ... [check]` lines (gcc, clang, clang-tidy), maps file paths to
@@ -638,6 +639,10 @@ def same_lines(t: dict, text: str, tree: Path) -> list[str]:
 
 
 def _lines_differ(base: list[str], head: list[str]) -> str:
+    if not base and not head:
+        return ("same_lines matched no output line at base or head: the guard checks nothing "
+                "(CMake prints message(STATUS) lines as '-- <text>'; is the configure output "
+                "silenced?)")
     gone = [ln for ln in base if ln not in head]
     new = [ln for ln in head if ln not in base]
     if not gone and not new:

@@ -413,3 +413,19 @@ def test_same_lines_catches_a_dependency_resolved_differently(tmp_path):
 def test_same_lines_only_on_reference_tiers():
     bad = check(SAME.replace('kind = "reference"', 'kind = "command"'))[1]
     assert any("same_lines is for reference tiers" in b for b in bad)
+
+
+def test_same_lines_matching_nothing_fails(tmp_path):
+    (tmp_path / "r").mkdir()
+    repo = make_repo(tmp_path / "r", SAME.replace("'^-- Found dep'", "'^\\\\[nothing\\\\] '"))
+    doc_edit(repo)
+    rc, checks = gate_json(repo)
+    assert rc == 1 and "the guard checks nothing" in checks["ref"]["detail"]
+
+
+def test_structure_detail_names_json_keys_and_lines():
+    from cce_code_health.compare import compare
+    ok, d = compare(b'{"a": "x1", "b": "y", "c": "z"}', b'{"a": "x2", "b": "y", "c": "w"}', "h.json", None)
+    assert not ok and d.startswith("differs:") and "2 of 3 keys (a, c)" in d
+    ok, d = compare(b"one\ntwo\n", b"one\nthree\n", "o.txt", None)
+    assert not ok and d == "differs in text: 1 of 3 lines (first at line 2)"

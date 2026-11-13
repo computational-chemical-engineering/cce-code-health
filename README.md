@@ -242,9 +242,11 @@ last = 2
   directory, where a sibling checkout (`../core`) does not exist: a build that falls back to
   FetchContent or another install there compiles against a different dependency, and the
   bitwise comparison then measures the wrong thing. Match lines the build prints on **every**
-  configure (your own `message()` lines naming resolved paths and versions): CMake's
-  `-- Found X` lines appear only when a cached result changes, so an incremental head
-  configure omits them. Keep configure output in the log (no `>/dev/null`). Pin such
+  configure (your own `message()` lines naming resolved paths and versions; `message(STATUS)`
+  prints them as `-- <text>`, so match `'^-- \[proj\] '`), and log every branch of a
+  resolution symmetrically (sibling and fetched alike), or base and head differ falsely.
+  CMake's `-- Found X` lines appear only when a cached result changes, so an incremental head
+  configure omits them. A regex that matches nothing on both sides fails the tier. Keep configure output in the log (no `>/dev/null`). Pin such
   dependencies explicitly in the tier command as well (`FETCHCONTENT_SOURCE_DIR_<DEP>`,
   `FETCHCONTENT_FULLY_DISCONNECTED=ON`).
 - `findings` runs `cmd` in the tree of `--base` (the last accepted step) and at head, parses

@@ -90,7 +90,7 @@ def _text(base: bytes, head: bytes, tol):
             return False, "binary file, not comparable"
     tb, th = NUMBER.findall(base), NUMBER.findall(head)
     if NUMBER.sub(b"#", base) != NUMBER.sub(b"#", head) or len(tb) != len(th):
-        return False, f"differs in structure ({len(tb)} vs {len(th)} numbers)"
+        return False, _structure_detail(base, head, len(tb), len(th))
     kinds_b = [bool(INTEGER.fullmatch(t)) for t in tb]
     if kinds_b != [bool(INTEGER.fullmatch(t)) for t in th]:
         return False, "differs in structure (integer vs float token)"
@@ -105,6 +105,25 @@ def _text(base: bytes, head: bytes, tol):
             fh.append(float(h))
     good, w = _floats(fb, fh, [math.ulp(abs(x)) if math.isfinite(x) else math.inf for x in fb], tol)
     return _verdict(ok and good, w, tol)
+
+
+def _structure_detail(base: bytes, head: bytes, nb: int, nh: int) -> str:
+    """Where two texts differ beyond their numbers: JSON object keys, else lines."""
+    import json  # noqa: PLC0415
+    try:
+        jb, jh = json.loads(base), json.loads(head)
+    except ValueError:
+        jb = jh = None
+    if isinstance(jb, dict) and isinstance(jh, dict):
+        keys = sorted(set(jb) | set(jh), key=str)
+        bad = [k for k in keys if jb.get(k, ...) != jh.get(k, ...)]
+        return f"differs: {len(bad)} of {len(keys)} keys ({', '.join(map(str, bad[:5]))}" + (
+            ", ..." if len(bad) > 5 else "") + ")"
+    lb, lh = base.decode().split("\n"), head.decode().split("\n")
+    bad = [i for i in range(1, max(len(lb), len(lh)) + 1)
+           if (lb[i - 1] if i <= len(lb) else None) != (lh[i - 1] if i <= len(lh) else None)]
+    return (f"differs in text: {len(bad)} of {max(len(lb), len(lh))} lines (first at line {bad[0]})"
+            + (f"; {nb} vs {nh} numbers" if nb != nh else ""))
 
 
 def _verdict(ok: bool, worst, tol):

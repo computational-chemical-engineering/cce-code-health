@@ -104,3 +104,17 @@ Worst functions: dem `demSolveContacts` (debt 345, CCN 261, NLOC 912); flow `bin
 (NLOC 2,063) and `bind_solver` (nanobind binding tables: long but flat, a candidate for a
 "binding table" exclusion or recipe); flow `Solver<Grid>::scalarCutAssembleSolve` (CCN 128);
 voro `meshVolumeOptimize` (CCN 90, 14 params).
+
+## dem onboarding progress (peclet_health, 2026-11-13; nothing pushed to dem main)
+
+- Config on dem branch code-health (7538e81), revised from the draft: core pinned via
+  FETCHCONTENT_SOURCE_DIR + FULLY_DISCONNECTED (the base worktree had silently fetched core
+  v1.3.0), own core Python build, suite venv exported in the prefix (nanobind), CUDA with tests
+  and MPI, blocking clang_format tier, clang-tidy with GCC's omp.h via -isystem
+  (526 s, 2514 findings at main; 947 are Kokkos::View by value, intended).
+- Self-test PASS: src/solver_hertz.hpp:59 4.0 -> 7.0 (Hertz kn) detected by state_hash; 2110 s
+  wall time, mostly two cold host + CUDA builds.
+- WO-1 (before CB): *Kokkos suffix dropped from 97 identifiers, state_hash ALL IDENTICAL.
+- Lessons for any C++ adopter: (1) a dependency-resolution guard (`same_lines`) needs the build
+  to log every resolution branch symmetrically (dem 246837a); (2) CMake `message(STATUS)` lines
+  carry a `-- ` prefix; (3) a guard matching nothing must fail (now enforced).
