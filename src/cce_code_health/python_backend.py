@@ -34,10 +34,11 @@ class Allow:
     smells: tuple
     reason: str | None
     file_level: bool
+    names: frozenset = frozenset(SMELL_NAMES)   # smell names valid in this language
 
     @property
     def valid(self) -> bool:
-        return bool(self.reason) and all(s in SMELL_NAMES for s in self.smells)
+        return bool(self.reason) and all(s in self.names for s in self.smells)
 
 
 @dataclass
@@ -139,15 +140,16 @@ def units(tree: ast.Module):
     yield from walk(tree.body, "")
 
 
-def parse_allows(source: str) -> list[Allow]:
+def parse_allows(source: str, pattern: re.Pattern = ALLOW_RE,
+                 names: frozenset = frozenset(SMELL_NAMES)) -> list[Allow]:
     out = []
     for i, line in enumerate(source.splitlines(), 1):
         if "codehealth:" not in line:
             continue
-        m = ALLOW_RE.search(line)
+        m = pattern.search(line)
         if m:
             smells = tuple(s for s in re.split(r"[,\s]+", m.group(2)) if s)
-            out.append(Allow(i, smells, m.group(3), bool(m.group(1))))
+            out.append(Allow(i, smells, m.group(3), bool(m.group(1)), names))
     return out
 
 

@@ -309,8 +309,9 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         hit = restructure.plan_problems(plan, changes)
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
 
+    # Python-only rules: C++ static rules (public headers, literals) are not implemented yet.
     py = [(bp, hp) for _, bp, hp in changes
-          if (bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))]
+          if ((bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))) and (hp or bp).endswith(".py")]
     tb = gitio.read_files(repo, base, [bp for bp, _ in py if bp])
     th = gitio.read_files(repo, None, [hp for _, hp in py if hp])
     if g.get("literals", False):
@@ -1001,7 +1002,8 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
             candidates = [path]
         else:
             path, line, nth = None, None, None
-            candidates = sorted(p for p in gitio.ls_files(repo, head) if cfg.in_scope(p))
+            candidates = sorted(p for p in gitio.ls_files(repo, head)
+                                if cfg.in_scope(p) and p.endswith(".py"))
         # Baseline: every behaviour tier must pass on the unmutated HEAD, else "detected" is vacuous.
         beh = {t["name"] for t in _selected(cfg, "campaign", "refactor")
                if t.get("kind", "command") in ("reference", "command") and t.get("behaviour", True)}

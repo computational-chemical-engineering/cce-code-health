@@ -76,6 +76,36 @@ where methods connect through a shared `self.<attr>` (`cls.<attr>`) or a `self.<
 call or access; `None` below 3 methods. 1 is cohesive, 2 or more suggests the class
 could be split. It never affects debt, health or the gates.
 
+### C++ (experimental)
+
+`pip install 'cce-code-health[cpp]'` adds [lizard](https://github.com/terryyin/lizard), and
+a `[profiles]` table switches C++ on. Without it, C++ files are out of scope; `profile` keeps
+selecting the Python profile, as before.
+
+```toml
+schema = 1
+profile = "python@0"       # Python, unchanged
+[profiles]
+cpp = "cpp@0"              # .cpp .cc .cxx .c++ .hpp .hh .hxx .h .ipp .tpp .cu .cuh
+[scope]
+include = ["include/*.hpp", "src/*.cpp", "src/*.hpp"]
+```
+
+Profile `cpp@0` is uncalibrated (thresholds and weights by analogy with `python@0`). Debt per
+function: cyclomatic complexity (lizard's CCN, which counts if, for, while, case, catch, `&&`,
+`||` and `?`) above 10, weight 1; NLOC above 70, weight 0.1; nesting above 3, weight 3;
+parameters above 5, weight 1. A brain function has CCN > 25 and NLOC > 70. File smells as for
+Python: large above 1000 NLOC, huge above 2000, duplication above 10 % (8-line windows,
+comments ignored). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
+towards the enclosing function. Nesting is computed by codehealth, not lizard: if, for, while,
+do, switch and try open a level, braced or not; `else if`, else and catch do not. Suppressions
+use `// codehealth: allow ccn,nesting -- reason` on the line above the declaration (above its
+`template` line, if any) or on the lines up to its opening brace, and `allow-file`.
+
+`scan`, `diff`, `hotspots` and the gate's debt check cover C++ files. The gate's static rules
+`literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static
+rules (public headers, literals) are not implemented yet, and C++ files are skipped there.
+
 ## Behaviour gate (0.2.0.dev)
 
 ```bash

@@ -12,7 +12,8 @@ requires-python = ">=3.11"
 dependencies = ["complexipy>=8"]
 
 [project.optional-dependencies]
-test = ["pytest", "coverage", "numpy"]
+cpp = ["lizard>=1.17"]
+test = ["pytest", "coverage", "numpy", "lizard>=1.17"]
 
 [project.scripts]
 codehealth = "cce_code_health.cli:main"
