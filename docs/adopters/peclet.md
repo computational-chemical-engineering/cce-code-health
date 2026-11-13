@@ -131,3 +131,9 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
   parameter-object first; (3) cpp@0 does not see `[&]` captures (voteInvariant/withConsensus
   still couple the moved code to caller locals): documented, review checks it. Candidate for
   cpp@1: count by-reference captured names as parameters of the lambda.
+- S2 closed: 3 launch-params-struct steps (fcb957c ColorSchedule, 54315b3 HertzMaterials,
+  38d9cab VelocityPhaseViews over 12 halo kernels), all GATE PASS 13/13 first attempt; dem
+  1858.2 -> 1799.3; state_hash at 38d9cab ALL IDENTICAL. Boundary: dem 07f9dc5 playbook docs
+  commit, re-pinned c5ee4df, self-test skipped (no tier code changed). Seed recipe
+  launch-params-struct added from this evidence. S3 (WO-4): PGS velocity solve out of
+  demSolveContacts via a struct of references to ~30 caller locals.

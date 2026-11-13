@@ -12,6 +12,7 @@ side effects and floating-point operations, same exceptions and messages.
 | loop-body-extract | nesting inside loops | loop body with its own branching | body mutates many outer locals | move the body into `_handle_item(item, ...)` returning the update; keep iteration order |
 | table-dispatch | many conditionals on one key | `if kind == "a": ... elif kind == "b": ...` with uniform branch shape | branches differ in arguments or control flow | dict from key to private handler; unknown-key path unchanged (same exception and message) |
 | parameter-object | many parameters | the same group of 4+ parameters travels together through several private functions and forms one concept | public signatures (public_api rule); unrelated parameters | private dataclass for the group, used only between private functions |
+| launch-params-struct (C++) | many parameters on host launchers of device kernels | 4+ parameters (Views, material constants, schedules) travel together into several launchers and form one concept | the group is not one concept (a bag of the caller's locals); a member that is host-only or not trivially copyable would reach a device lambda | a struct passed by `const&` to the launcher, unpacked at the top into locals with the old names; kernel bodies and captures stay byte-identical, so review reads only the signature diff |
 | split-flag-argument | boolean flag parameter selecting behaviour | private function with a `mode`/`flag` switching two paths | public function | two private functions; callers call the right one |
 | consolidate-duplicate | duplication | identical blocks in 2+ places in scope | blocks differ in literals or order | one private helper; both call sites call it |
 | check-ladder | long function, many conditionals, left over after extract-phase | a run of 4+ rungs with the same shape (`if <check>: return <result>` or `raise`), evaluated in order | rungs differ in shape, bind locals that later rungs read, or mutate state | an ordered tuple of `(predicate, result)` pairs (private functions or small lambdas) and one loop returning the first match; same order, same short-circuit, same fall-through; do it in one step, never by peeling the tail rung by rung |
@@ -42,4 +43,5 @@ side effects and floating-point operations, same exceptions and messages.
   findings, not a to-do list.
 
 Evidence: OpenFlowsheet S17 review 1 (2026-11-13), 12 steps, 2 review-rejects; Peclet dem S1
-(2026-11-13), 3 extract-phase steps on demSolveContacts, all accepted.
+(2026-11-13), 3 extract-phase steps on demSolveContacts, all accepted; Peclet dem S2 (2026-11-13),
+3 launch-params-struct steps (12 halo kernels), all accepted on the first gate, debt 1858.2 -> 1799.3.
