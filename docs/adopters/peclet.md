@@ -137,3 +137,11 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
   commit, re-pinned c5ee4df, self-test skipped (no tier code changed). Seed recipe
   launch-params-struct added from this evidence. S3 (WO-4): PGS velocity solve out of
   demSolveContacts via a struct of references to ~30 caller locals.
+- S3 host side: 3 steps (36ef1a9 solveVelocityPhase, d609439 stabilizeVelocityPhase after 1
+  logged gate-fail, d9e8aa8 closeVelocityPhase), all GATE PASS 13/13 bitwise; file debt
+  327.7 -> 313.0; demSolveContacts 258.1 -> 114.6. Step 1 file gain 0.3 hid a function gain of
+  32.7 offset by a new 32.4 helper; step 2 moved the escalation/multilevel branching wholesale
+  (stabilizeVelocityPhase 96.4, now the file's top function): logged as an honest intermediate,
+  follow-up splits it by mode. VelocitySolveContext has 24 by-value members, no references, 0
+  ctx uses in lambda bodies. Tool: log `relocated` (new functions' debt / target drop) added
+  from this (0.99, 0.95, 0.0 for the three steps). CUDA device check pending.

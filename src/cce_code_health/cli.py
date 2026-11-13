@@ -412,7 +412,8 @@ def target_debt(target: str, fd: dict | None, renames: dict[str, str] | None = N
     file (an extracted helper that is itself a hotspot), from the gate's `function_debt`.
     None when the gate JSON has no function data or the target names no function. A target
     `path::name` matches `path::name` exactly, else a function whose name ends in `::name` or
-    `.name` (C++ namespaces, Python classes)."""
+    `.name` (C++ namespaces, Python classes). `relocated`: the new functions' debt as a share
+    of the target's drop (near 1: the complexity moved to a new address), None without a drop."""
     if not fd or "::" not in target:
         return None
     path, name = target.split("::", 1)
@@ -428,8 +429,10 @@ def target_debt(target: str, fd: dict | None, renames: dict[str, str] | None = N
         return {"ambiguous": sorted(set(kb + ka))}
     new = {q[len(path) + 2:]: d for q, d in after.items()
            if q.startswith(f"{path}::") and q not in before and q not in ka}
-    return {"before": before[kb[0]] if kb else 0.0, "after": after[ka[0]] if ka else 0.0,
-            "new_in_file": dict(sorted(new.items(), key=lambda x: -x[1]))}
+    b, af = before[kb[0]] if kb else 0.0, after[ka[0]] if ka else 0.0
+    drop = b - af
+    return {"before": b, "after": af, "new_in_file": dict(sorted(new.items(), key=lambda x: -x[1])),
+            "relocated": round(min(sum(new.values()) / drop, 9.99), 2) if drop > EPS else None}
 
 
 def cmd_log(a) -> int:
@@ -468,7 +471,8 @@ def cmd_log(a) -> int:
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
     td = rec["target_debt"] or {}
-    fn = (f", function {td['before']} -> {td['after']}" if "before" in td else
+    rel = f", {td['relocated']:.0%} of it relocated" if td.get("relocated") else ""
+    fn = (f", function {td['before']} -> {td['after']}{rel}" if "before" in td else
           f", function ambiguous: {', '.join(td['ambiguous'])}" if "ambiguous" in td else "")
     born = ", ".join(f"{k} {v}" for k, v in list(td.get("new_in_file", {}).items())[:3])
     print(f"LOG {a.campaign} step {rec['step']} {result} {a.target} "

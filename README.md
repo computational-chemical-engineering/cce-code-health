@@ -187,7 +187,8 @@ failed keeps its evidence), else null. Debt in the gate is per touched file; for
 target (`path::name`) the record also carries `target_debt`: the function's own debt before and
 after (0 when absent; a name matches exactly or as the last `::`/`.` component) and
 `new_in_file`, the new functions with debt in that file (an extracted helper that is a hotspot
-itself). The gate JSON's meta `function_debt` holds the per-function numbers it comes from.
+itself), and `relocated`, their debt as a share of the function's drop (near 1: the complexity
+moved to a new address; Peclet dem S3: 0.99 and 0.95 for two steps whose file gain was 0.3 and 5.4). The gate JSON's meta `function_debt` holds the per-function numbers it comes from.
 
 ```bash
 codehealth gate --base <last-accepted> --revert <sha> [--revert <sha> ...]

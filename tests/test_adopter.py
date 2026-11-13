@@ -183,7 +183,7 @@ def test_log_accepted_flow(drepo, capsys):
     assert rec["result"] == "accepted" and rec["head_sha"] == sha(drepo) and rec["failed_tier"] is None
     assert rec["checks"]["gain"] if "gain" in rec["checks"] else rec["checks"]["debt"]
     assert rec["details"]["debt"] == "4.0 -> 3.0" and rec["model"] == "m"
-    assert rec["target_debt"] == {"before": 4.0, "after": 3.0, "new_in_file": {}}
+    assert rec["target_debt"] == {"before": 4.0, "after": 3.0, "new_in_file": {}, "relocated": 0.0}
     assert log(drepo, "g.json") == 2                                # duplicate
     assert "duplicate" in capsys.readouterr().err
     assert len(out.read_text().splitlines()) == 1
@@ -305,10 +305,12 @@ def test_target_debt_matching():
                     "src/a.cpp::ns::phaseA": 30.1, "src/a.cpp::ns::phaseB": 5.0}}
     assert target_debt("src/a.cpp::solve", fd) == {
         "before": 345.0, "after": 258.3,
-        "new_in_file": {"ns::phaseA": 30.1, "ns::phaseB": 5.0}}
+        "new_in_file": {"ns::phaseA": 30.1, "ns::phaseB": 5.0}, "relocated": 0.4}
     assert target_debt("src/a.cpp::ns::solve", fd)["after"] == 258.3
     assert target_debt("src/a.cpp", fd) is None and target_debt("src/a.cpp::x", None) is None
     gone = target_debt("src/a.cpp::other", {"before": fd["before"], "after": {}})
-    assert gone["before"] == 2.0 and gone["after"] == 0.0
+    assert gone["before"] == 2.0 and gone["after"] == 0.0 and gone["relocated"] == 0.0
+    flat = target_debt("src/a.cpp::other", {"before": fd["before"], "after": fd["before"]})
+    assert flat["relocated"] is None
     amb = {"before": {"p.py::A.run": 1.0, "p.py::B.run": 1.0}, "after": {}}
     assert target_debt("p.py::run", amb) == {"ambiguous": ["p.py::A.run", "p.py::B.run"]}
