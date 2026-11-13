@@ -38,15 +38,38 @@ onboarding itself is a work package for a Peclet session, under Peclet's own pro
 | clang-tidy | command, behaviour=false | campaign | existing `.clang-tidy`; count of findings per check may not rise |
 | benchmark | benchmark | campaign (optimize: step) | `bench`-labelled ctests or `vof_perf` scripts, ABBA, thread pins |
 
-Scope for a first campaign: one repository (pnm or morton: small, already tidy) to calibrate
-cpp@0 and the build cost per step; flow only after that.
+## Agreed with peclet_health (SMM-TRS2, 2026-11-13)
+
+- Counterpart: session `peclet_health` on SMM-TRS2, checkouts `/home/frankp/Codes/suite/<repo>`;
+  campaign worktrees `suite/<repo>-health-<topic>`. It runs all builds and tests on TRS2
+  (48 cores, RTX 5080); code_health does not. Read-only ssh look is allowed.
+- **First target: dem** (17k C++ lines, Kokkos + ArborX, optional MPI, nanobind; idle and
+  unclaimed; byte gate `tests/regression/state_hash.py`). pnm is mostly frozen by the A7 paper
+  branch; flow VoF/viscous and voro lagrangian/ are frozen for now. Tiny fallbacks for
+  calibration: morton (2.4k lines; performance-tuned, so metrics may mislead), geom (0.4k,
+  vendored into core).
+- dem build: `cmake -S . -B build -DCMAKE_PREFIX_PATH=$PWD/../extern/install/nvidia-cuda
+  -DPECLET_DEM_BUILD_TESTS=ON [-DPECLET_DEM_MPI=ON]`; tests exit 77 for "cannot run": that is
+  SKIP, never pass. ctest exits 0 with skipped tests, so the gate needs an output pattern.
+- Constraints: docs/DECISIONS.md binding (no swapping in a rejected alternative); never change
+  numerics while restructuring; bitwise class on host/OpenMP only (CUDA differs by FMA
+  contraction by design); no env var may change a result; public Python names per
+  docs/NAMING.md; OpenMP always bounded (OMP_NUM_THREADS 2..8, OMP_PROC_BIND=false); MPI ctests
+  `--bind-to none`; Snellius/LUMI out of scope; shared checkouts: own worktree and build dir,
+  named-path staging; push straight to main (no PRs), umbrella pointer bumped last.
+- Frozen-ish: cmake/PecletDeps.cmake, shared CMake modules, regression baselines, CLAUDE.md.
+- Tools: clang-tidy 19.1.7, clang-format 18.1.8 (suite venv). Warnings and tidy as a ratchet,
+  not -Werror. core needs Release (state_hash checks the toolchain string, SKIPPED otherwise).
+- No (h, error) refinement script is known yet; the convergence tier waits for one.
+- Timings: to be measured by peclet_health (dem build cold/incremental, ctest, state_hash).
 
 ## What cce-code-health provides now and what is missing
 
 - Provides (in progress 2026-11-13): cpp@0 profile (lizard: cyclomatic, NLOC, nesting,
   params; uncalibrated) for scan, diff, hotspots and the gate's debt rule; change coupling;
   gate tiers, self-test, `--revert`, `codehealth log`; refactor and optimize skills.
-- Missing before onboarding: decision 14 checks (flag identity and forbidden-flag scan in a
+- Missing before onboarding: tier `skip_exit` (77 = not run = fail) and `fail_regex`;
+  decision 14 checks (flag identity and forbidden-flag scan in a
   step); C++ static rules (public headers, literal changes); a warnings/clang-tidy ratchet
   helper (count per check, base vs head); a convergence-order helper (observed order from
   (h, error) pairs, compared against a declared band); cpp@0 calibration against CodeScene.
