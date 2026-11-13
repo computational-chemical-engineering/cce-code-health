@@ -77,6 +77,17 @@ campaign is one of its work packages and follows those rules.
    `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it
    to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
 
+## Restructure (splitting large files: human-approved)
+
+Debt inside a 1,000+ line module often needs new modules, which the refactor class forbids
+(new files, new public names). Propose instead: list the target file, the new files and the
+names that move, and why (`codehealth coupling` and `codehealth arch` give evidence). The
+human commits `.codehealth/restructure/<id>.toml` (`id`, `approved_by`, `reason`,
+`new_files`, `new_public`) before the campaign base. Steps then run with
+`codehealth gate --mode restructure --plan .codehealth/restructure/<id>.toml ...`: new files
+and public names only as planned, every old import path kept as a re-export, behaviour
+bitwise. Commit trailer `Codehealth-Class: restructure`. Never write or edit the plan yourself.
+
 ## Review against gaming (every ~5 accepted steps)
 
 A fresh-context reviewer (the repo's review lane, or an agent that sees only the diffs)

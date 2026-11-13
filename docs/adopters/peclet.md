@@ -76,4 +76,12 @@ onboarding itself is a work package for a Peclet session, under Peclet's own pro
 
 ## Smoke scan
 
-(to be filled from the cpp@0 smoke test)
+cpp@0 on GitHub main clones of peclet-core, -flow, -dem and -voro (2026-11-13, scope
+`include/` and `src/` C++ only; uncalibrated profile, so relative numbers matter more than
+absolute ones): 200 files, 79,418 NLOC, debt 9,769.9 (123.0 per kNLOC; OpenFlowsheet src is
+not comparable across profiles), display health 5.27; 3,703 functions,
+89 brain functions; 14 large and 4 huge files; scan 1.3 to 4.5 s per repo.
+Worst functions: dem `demSolveContacts` (debt 345, CCN 261, NLOC 912); flow `bind_diagnostics`
+(NLOC 2,063) and `bind_solver` (nanobind binding tables: long but flat, a candidate for a
+"binding table" exclusion or recipe); flow `Solver<Grid>::scalarCutAssembleSolve` (CCN 128);
+voro `meshVolumeOptimize` (CCN 90, 14 params).
