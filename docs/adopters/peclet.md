@@ -61,7 +61,17 @@ onboarding itself is a work package for a Peclet session, under Peclet's own pro
 - Tools: clang-tidy 19.1.7, clang-format 18.1.8 (suite venv). Warnings and tidy as a ratchet,
   not -Werror. core needs Release (state_hash checks the toolchain string, SKIPPED otherwise).
 - No (h, error) refinement script is known yet; the convergence tier waits for one.
-- Timings: to be measured by peclet_health (dem build cold/incremental, ctest, state_hash).
+- Timings (peclet_health, TRS2 at load ~80/48 cores, -j32, dem e375b97): host build cold 149 s,
+  header touch 146 s (header-only: incremental ~ cold); CUDA compile-only cold 197 s, header
+  touch 180 s; ctest -LE bench 303 tests 343 s at OMP_NUM_THREADS=1 -j1; state_hash 6 s,
+  reproducible, MPI np1/np2 included. One step ~9 min plus the base build when the base moves.
+- Traps: OMP_NUM_THREADS=1 + OMP_PROC_BIND=false (8 threads/rank: np8 tests 635 s each);
+  MPIEXEC_PREFLAGS="--bind-to none" with a space for dem (core's ';' form breaks all MPI
+  tests); PYTHONPATH must reach a core Python build with peclet.halo, else 12 python_mpi tests
+  print ***Skipped and ctest exits 0; CUDA at /usr/local/cuda/bin (13.5); state_hash skips MPI
+  cases silently without mpi4py + peclet.halo; .npz outputs are not byte-stable (zip times).
+- Config draft sent 2026-11-13: docs/adopters/dem-config-draft.toml (peclet_health reviews and
+  commits it in dem). Self-test on C++ needs `--mutate path:line[:N]` (C++ literal scanner).
 
 ## What cce-code-health provides now and what is missing
 

@@ -1,0 +1,123 @@
+# DRAFT .codehealth/config.toml for peclet-dem (code_health, 2026-11-13), for peclet_health to
+# review and commit in dem before the campaign base. Not used by cce-code-health itself.
+# Sources: dem e375b97 (CMakeLists.txt, tests/regression/state_hash.py, .gitignore), timings
+# and traps measured by peclet_health on TRS2 (2026-11-13).
+#
+# Needs in the environment of the session that runs `codehealth gate`:
+#   PECLET_SUITE=/home/frankp/Codes/suite   (absolute: the base side runs in a worktree under
+#                                           <git-common-dir>/codehealth/base-<sha>, so relative
+#                                           ../core or ../extern paths do not exist there)
+#   CLANG_TIDY=<suite venv>/bin/clang-tidy  (19.1.7; campaign cadence only)
+# Build directories are {repo}/build_health_* (ignored by dem's .gitignore `build_*/`, so the
+# gate does not count them as touched files).
+
+schema = 1
+
+[profiles]
+python = "python@0"
+cpp = "cpp@0"
+
+[scope]
+include = ["src/*"]
+
+[gate]
+frozen = ["cmake/*", "CMakeLists.txt", "tests/regression/*", "CLAUDE.md"]
+forbid = ["tests/*", "packaging/*", "pyproject.toml"]
+# literals and public_api are Python-only rules: dem's Python surface is the compiled module, so
+# they would say "not checked: N C++ file(s)". Public names are guarded by the ctest python tests
+# and state_hash (every public entry path), and by review.
+literals = false
+public_api = false
+flags = true                     # decision 14 (on anyway with a C++ profile)
+keep_going = false
+# fail fast when the suite path is missing (prefix is prepended to every tier command)
+prefix = ': "${PECLET_SUITE:?set PECLET_SUITE to the suite checkout}" &&'
+
+[gate.env]
+OMP_NUM_THREADS = "1"            # trap 1: at 8 threads per rank np4/np8 ran 113 s and 635 s each
+OMP_PROC_BIND = "false"
+OPENBLAS_NUM_THREADS = "1"
+MKL_NUM_THREADS = "1"
+PYTHONHASHSEED = "0"
+
+# Host build, Release, the flags of a normal host build plus -ffp-contract=off (decision 14:
+# refactor builds never contract). Same command on both sides, so flags are identical.
+# trap 2: MPIEXEC_PREFLAGS with a SPACE (dem splits it with separate_arguments).
+[[gate.tier]]
+name = "build_host"
+kind = "command"
+behaviour = false
+cadence = "step"
+timeout = 900                    # measured 149 s cold, 146 s after a header touch (-j32, load 80)
+cmd = '''cmake -S {repo} -B {repo}/build_health_host -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PECLET_SUITE/extern/install/host-openmp \
+  -DPECLET_DEM_BUILD_TESTS=ON -DPECLET_DEM_MPI=ON "-DMPIEXEC_PREFLAGS=--bind-to none" \
+  -DCMAKE_CXX_FLAGS=-ffp-contract=off -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  && cmake --build {repo}/build_health_host -j32'''
+
+# Full battery (303 tests, 343 s at -j1 measured). trap 3: PYTHONPATH must reach peclet.halo in
+# a core Python build, else the 12 python_mpi_* tests print "***Skipped" and ctest exits 0.
+# Tests with SKIP_RETURN_CODE 77 show as "***Skipped" too: fail_regex turns every skip into a
+# failure; skip_exit guards a wrapper that exits 77 itself.
+[[gate.tier]]
+name = "ctest_host"
+kind = "command"
+cadence = "step"
+timeout = 2400
+skip_exit = 77
+fail_regex = '\*\*\*Skipped|Not Run|No tests were found'
+detect_exit = [8]                # ctest: 8 = tests failed (a real detection); other codes = error
+# Builds first (a no-op after build_host): the self-test runs only behaviour tiers, in a fresh
+# worktree, so this tier must not rely on build_host having run.
+cmd = '''cmake -S {repo} -B {repo}/build_health_host -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PECLET_SUITE/extern/install/host-openmp \
+  -DPECLET_DEM_BUILD_TESTS=ON -DPECLET_DEM_MPI=ON "-DMPIEXEC_PREFLAGS=--bind-to none" \
+  -DCMAKE_CXX_FLAGS=-ffp-contract=off -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null \
+  && cmake --build {repo}/build_health_host -j32 >/dev/null \
+  && PYTHONPATH={repo}/build_health_host:$PECLET_SUITE/core/build_rel15_host_py \
+     ctest --test-dir {repo}/build_health_host -LE bench -j1 --timeout 1200 --output-on-failure'''
+
+# Bitwise reference: state_hash over every public entry path (single and MPI np1/np2), base
+# (campaign base, built once and cached per sha) vs head. Only hashes.json is compared: the
+# .npz files carry zip timestamps. The MPI cases are skipped SILENTLY without mpi4py +
+# peclet.halo, so fail_regex makes a skip a failure on either side.
+[[gate.tier]]
+name = "state_hash"
+kind = "reference"
+cadence = "step"
+timeout = 900                    # base side includes its build (about 150 s) + 6 s per run
+fail_regex = 'mpi cases skipped'
+outputs = ["hashes.json"]
+cmd = '''cmake -S {repo} -B {repo}/build_health_host -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PECLET_SUITE/extern/install/host-openmp \
+  -DPECLET_DEM_BUILD_TESTS=ON -DPECLET_DEM_MPI=ON "-DMPIEXEC_PREFLAGS=--bind-to none" \
+  -DCMAKE_CXX_FLAGS=-ffp-contract=off -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null \
+  && cmake --build {repo}/build_health_host -j32 >/dev/null \
+  && PYTHONPATH={repo}/build_health_host:$PECLET_SUITE/core/build_rel15_host_py \
+     python {repo}/tests/regression/state_hash.py --save {out}'''
+
+# CUDA compile only (trap 4: /usr/local/cuda/bin, 13.5). Catches KOKKOS_LAMBDA / this-capture
+# breakage when kernels move into functors while the host build stays green. No device runs.
+[[gate.tier]]
+name = "build_cuda"
+kind = "command"
+behaviour = false
+cadence = "step"
+timeout = 1200                   # measured 197 s cold, 180 s after a header touch
+cmd = '''PATH=/usr/local/cuda/bin:$PATH cmake -S {repo} -B {repo}/build_health_cuda \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PECLET_SUITE/extern/install/nvidia-cuda \
+  && PATH=/usr/local/cuda/bin:$PATH cmake --build {repo}/build_health_cuda -j32'''
+
+# clang-tidy ratchet (dem's .clang-tidy): findings per (file, check) may not rise. Runs in the
+# last accepted commit's tree and at head; configure only (2 s) for compile_commands.json.
+[[gate.tier]]
+name = "clang_tidy"
+kind = "findings"
+cadence = "campaign"
+format = "gcc"
+ignore_exit = true
+timeout = 3600
+cmd = '''cmake -S {repo} -B {repo}/build_health_tidy -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=$PECLET_SUITE/extern/install/host-openmp -DPECLET_DEM_MPI=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null \
+  && ${CLANG_TIDY:-clang-tidy} -p {repo}/build_health_tidy --quiet {repo}/src/dem_bindings.cpp'''

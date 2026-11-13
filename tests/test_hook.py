@@ -198,3 +198,16 @@ def test_post_edit_script_relays_report_only_with_config_and_py(repo, tmp_path_f
     assert run_script(repo, "a.py", fake_bin(tmp_path_factory.mktemp("bin"), "codehealth: x", 1)).returncode == 0
     (repo / ".codehealth/config.toml").unlink()
     assert run_script(repo, "a.py", env).returncode == 0
+
+
+def test_docstring_rule_with_docs_table():
+    from cce_code_health import config
+    from cce_code_health.hook import check_edit
+    cfg = config.parse('schema = 1\n[scope]\ninclude = ["pkg/*"]\n[docs]\ninclude = ["*.md"]\n'
+                       'docstrings = true\n', "t")
+    old = 'def f():\n    """F."""\n'
+    msg = check_edit("pkg/m.py", old, old + "\n\ndef g():\n    return 1\n", cfg)
+    assert msg.startswith("codehealth: pkg/m.py: docstrings") and "g: public name without docstring" in msg
+    assert check_edit("pkg/m.py", old, old + '\n\ndef g():\n    """G."""\n', cfg) is None
+    off = config.parse('schema = 1\n[scope]\ninclude = ["pkg/*"]\n', "t")
+    assert check_edit("pkg/m.py", old, old + "\n\ndef g():\n    return 1\n", off) is None

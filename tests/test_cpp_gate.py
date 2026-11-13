@@ -337,3 +337,44 @@ def test_config_check_build_tier_keys(tier, ok):
 def test_config_check_flags(gate_extra, ok):
     _, bad = check(f"schema = 1\n[gate]\n{gate_extra}\n")
     assert (not bad) is ok, bad
+
+
+# -- self-test on C++ sources ------------------------------------------------------------------
+
+def test_cpp_literal_sites_skip_comments_strings_preprocessor():
+    src = ('int f() {\n  /* 3 */ double x = 0.5f * 2 + 1e-3; // 7\n'
+           '  const char* c = "9"; return x > 3u;\n#define A 5\n  int o = 017;\n}\n')
+    sites = gatemod._cpp_literal_sites(src, 2)
+    assert [s[3] for s in sites] == [0.5, 2, 0.001]
+    assert [s[3] for s in gatemod._cpp_literal_sites(src, 3)] == [3]
+    assert gatemod._cpp_literal_sites(src, 4) == [] and gatemod._cpp_literal_sites(src, 5) == []
+    text, what = gatemod.mutate_source(src, sites[0])
+    assert "double x = 1.75f * 2" in text and what == "line 2 col 22: 0.5 -> 1.75"
+
+
+CPP_REF = """
+schema = 1
+[profiles]
+cpp = "cpp@0"
+[scope]
+include = ["src/*"]
+[[gate.tier]]
+name = "hash"
+kind = "reference"
+outputs = ["o.txt"]
+timeout = 60
+cmd = "sed -n 3p {repo}/src/k.hpp > {out}/o.txt"
+"""
+
+
+def test_self_test_mutates_a_cpp_literal(tmp_path):
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".codehealth/config.toml": CPP_REF,
+                      "src/k.hpp": "// kernel\ninline double k(double x) {\n  return 0.25 * x;  // 9\n}\n"})
+    out = tmp_path.parent / "st.json"
+    rc = main(["gate", "--repo", str(tmp_path), "--self-test", "--mutate", "src/k.hpp:3",
+               "--log", str(tmp_path.parent / "st.log"), "--json", str(out)])
+    data = json.loads(out.read_text())
+    assert rc == 0 and data["checks"][0]["outcome"] == "detected"
+    assert main(["gate", "--repo", str(tmp_path), "--self-test",
+                 "--log", str(tmp_path.parent / "st.log")]) == 2       # C++ needs --mutate

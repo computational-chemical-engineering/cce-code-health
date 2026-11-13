@@ -49,6 +49,7 @@ class Config:
     gate: dict = field(default_factory=dict)   # raw [gate] table, interpreted by gate.py
     hook: dict = field(default_factory=dict)   # raw [hook] table, interpreted by hook.py
     architecture: dict = field(default_factory=dict)   # raw [architecture] table (architecture.py)
+    docs: dict = field(default_factory=dict)           # raw [docs] table (docs.py, docstrings.py)
     other_profiles: dict = field(default_factory=dict)   # language -> Profile, not Python
 
     def profile_for(self, path: str) -> profiles.Profile | None:
@@ -74,7 +75,8 @@ def parse(text: str, source: str) -> Config:
     return Config(profile=python, include=list(scope.get("include", ["*"])),
                   exclude=list(scope.get("exclude", [])), source=source,
                   gate=dict(data.get("gate", {})), hook=dict(data.get("hook", {})),
-                  architecture=dict(data.get("architecture", {})), other_profiles=other)
+                  architecture=dict(data.get("architecture", {})), other_profiles=other,
+                  docs=dict(data.get("docs", {})))
 
 
 def _profiles(data: dict) -> tuple[profiles.Profile, dict]:
@@ -105,7 +107,7 @@ def load(repo: Path, ref: str | None) -> Config:
     return parse(texts[CONFIG_PATH], f"{ref or 'worktree'}:{CONFIG_PATH}")
 
 
-TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architecture"}
+TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architecture", "docs"}
 HOOK_KEYS = {"enabled"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
@@ -150,6 +152,14 @@ def check(text: str) -> tuple[list[str], list[str]]:
             arch = data["architecture"]
             info.append(f"architecture: {len(arch.get('layers', []))} layer rule(s), "
                         f"{len(arch.get('forbid', []))} forbid rule(s), cycle_depth {arch.get('cycle_depth', 2)}")
+    if "docs" in data:
+        from .docs import check_config as docs_check  # noqa: PLC0415 (docs imports config)
+        docs_bad = docs_check(data["docs"]) if isinstance(data["docs"], dict) else ["[docs] must be a table"]
+        bad += docs_bad
+        if not docs_bad:
+            dd = data["docs"]
+            info.append(f"docs: {len(dd['include'])} include glob(s), {len(dd.get('records', []))} record "
+                        f"glob(s), anchors {dd.get('anchors', 'warn')}, docstrings {dd.get('docstrings', False)}")
     if isinstance(data.get("profiles"), dict) and "cpp" in data["profiles"]:
         info += [f"WARNING [gate] {k} = true is not checked for C++ files (Python only; the check "
                  f"passes and says 'not checked')" for k in ("public_api", "literals") if gate.get(k)]

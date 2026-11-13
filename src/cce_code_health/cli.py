@@ -151,10 +151,20 @@ def cmd_diff(a) -> int:
         failures += arch[0]
         rows += [f"  {g}" for g in arch[1]]
         rows += [f"  WARNING {w}" for w in arch[2]]
+    from . import docs as docsmod, docstrings  # noqa: PLC0415
+    doc_res = docsmod.compare(repo, base, head, cfg)          # None without [docs]
+    if doc_res:
+        failures += doc_res.failures
+        rows += [f"  WARNING {w}" for w in doc_res.warnings]
+        rows += [f"  review {d} (references {t}, changed here)" for d, t in sorted(set(doc_res.review))[:20]]
+    ds = docstrings.compare_refs(repo, base, head, cfg, gitio.changes(repo, base, head))
+    failures += ds or []
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
                         "debt_base": round(db, 3), "debt_head": round(dh, 3),
                         "failures": failures, "base": rb, "head": rh,
-                        **({"architecture_improvements": arch[1]} if arch else {})})
+                        **({"architecture_improvements": arch[1]} if arch else {}),
+                        **({"docs": {"warnings": doc_res.warnings, "notes": doc_res.notes,
+                                     "review": sorted(set(doc_res.review))}} if doc_res else {})})
     print("\n".join(rows))
     for f in failures:
         print(f"  FAIL {f}")
@@ -178,6 +188,36 @@ def cmd_arch(a) -> int:
         print(f"  WARNING {w}")
     print(f"ARCH {repo.name}@{(ref or 'worktree')[:10]}: {res.files} files, {len(res.imports)} imports, "
           f"{len(res.violations)} violation(s), {len(res.cycles)} cycle(s)")
+    return 0
+
+
+def cmd_docs(a) -> int:
+    from . import docs as docsmod  # noqa: PLC0415
+    repo = Path(a.repo).resolve()
+    ref = gitio.rev(repo, a.ref) if a.ref else None
+    cfg = _load(a, repo, ref)
+    res = docsmod.analyse(repo, ref, cfg)
+    if res is None:
+        raise ValueError(f"{cfg.source}: no [docs] table")
+    d = cfg.docs
+    st = docsmod.stats(res, d)
+    res.tree.close()
+    broken = [(doc, o) for doc, occs in res.docs.items() if not docsmod.is_record(doc, d)
+              for o in occs if o.status == "broken"]
+    if a.stats:
+        for (rec, kind, status, why), n in sorted(st.items()):
+            print(f"  {rec:6} {kind:6} {status:6} {why:24} {n}")
+    for doc, o in broken[:a.top]:
+        print(f"  {doc}:{o.line}{f' ({o.where})' if o.where else ''} {o.ref.kind} `{o.ref.text}`: {o.reason}")
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"),
+                        "stats": [{"docs": k[0], "kind": k[1], "status": k[2], "reason": k[3], "n": n}
+                                  for k, n in sorted(st.items())],
+                        "broken": [{"doc": doc, "line": o.line, "where": o.where, "kind": o.ref.kind,
+                                    "text": o.ref.text, "reason": o.reason} for doc, o in broken]})
+    refs = sum(st.values())
+    print(f"DOCS {repo.name}@{(ref or 'worktree')[:10]}: {len(res.docs)} docs, {refs} references, "
+          f"{sum(n for k, n in st.items() if k[2] == 'ok')} ok, {len(broken)} broken in living docs, "
+          f"{sum(n for k, n in st.items() if k[2] == 'broken' and k[0] == 'record')} in records")
     return 0
 
 
@@ -455,6 +495,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="keep pairs of a test file with a non-test file (dropped by default)")
     pk.add_argument("--depth", type=int, help="module = first N directory components (default: whole directory)")
     pk.add_argument("--top", type=int, default=30)
+    pd = sub.add_parser("docs", help="documentation references: broken paths, anchors, test ids, Python names")
+    pd.set_defaults(fn=cmd_docs)
+    pd.add_argument("--repo", default=".")
+    pd.add_argument("--json", help="write the full report to this file")
+    pd.add_argument("--ref", help="commit to analyse (default: working tree)")
+    pd.add_argument("--stats", action="store_true", help="counts per docs class, kind, status and reason")
+    pd.add_argument("--top", type=int, default=30, help="broken references to list (living docs)")
+    pd.add_argument("--config", dest="trial_config",
+                    help="read-only trial: use this config file instead of the repo's")
     pc = sub.add_parser("config", help="validate the gate configuration")
     pc.set_defaults(fn=cmd_config)
     pc.add_argument("--repo", default=".")

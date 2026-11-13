@@ -55,6 +55,10 @@ def check_edit(rel: str, old_text: str, new_text: str, cfg: config.Config) -> st
     new = _report(rel, new_text, cfg)
     if new is None:
         return None
+    ds = []
+    if (cfg.docs or {}).get("docstrings") and rel.endswith(".py"):
+        from . import docstrings  # noqa: PLC0415
+        ds = docstrings.ratchet({rel: old_text} if old_text else {}, {rel: new_text}, {})
     old = _report(rel, old_text, cfg) if old_text else None
     old_fns = {f["qualname"]: f for f in old["functions"]} if old else {}
     old_brains = {q for q, f in old_fns.items() if f["brain"]}
@@ -68,7 +72,11 @@ def check_edit(rel: str, old_text: str, new_text: str, cfg: config.Config) -> st
     smells = sorted(set(new["file_smells"]) - set(old["file_smells"] if old else []))
     inv = len(_invalid(new)) > len(_invalid(old))
     if not (new["debt"] > d0 + EPS or bad or smells or inv):
-        return None
+        if not ds:
+            return None
+        return "\n".join([f"codehealth: {rel}: docstrings"] + [f"  {x}" for x in ds[:MAX_FUNCTIONS]]
+                         + ["Add a docstring to each new public name; keep a documented parameter list "
+                            "equal to the signature."])
     lines = [f"codehealth: {rel}: debt {d0:.1f} -> {new['debt']:.1f}"]
     lines += [_fn_line(f, cfg) for f in bad[:MAX_FUNCTIONS]]
     if len(bad) > MAX_FUNCTIONS:
@@ -77,6 +85,7 @@ def check_edit(rel: str, old_text: str, new_text: str, cfg: config.Config) -> st
         lines.append(f"  new file smell: {', '.join(smells)}")
     if inv:
         lines.append("  new invalid suppression (needs known smell and '-- reason')")
+    lines += [f"  {x}" for x in ds[:MAX_FUNCTIONS]]
     return "\n".join(lines + [ADVICE])
 
 

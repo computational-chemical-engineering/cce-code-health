@@ -43,12 +43,30 @@ is deliberate (for example a numerical kernel that is clearer as one function), 
 your reply to the user with the reason; do not add a `codehealth: allow` suppression
 unless the user agrees, and then always with `-- reason`.
 
+## Docs (repos with a `[docs]` table)
+
+- Docs change in the same commit as the code they describe. When you rename, move or remove
+  a file, function, class or test, update every doc that names it; `codehealth diff` lists
+  the docs that reference changed files under "review" and fails on references that stopped
+  resolving.
+- Write references that a tool can check: backticked repo paths (`src/pkg/x.py`), pytest ids
+  (`tests/test_x.py::test_y`), dotted names (`pkg.mod.func`). Never cite a path, test or name
+  you have not seen in the tree: `codehealth diff` reports every new reference that does not
+  resolve (planned files in a brief are fine; say they are planned).
+- Prefer a name over a line anchor (`pkg/x.py::func` or `pkg.x.func`, not `pkg/x.py:120`):
+  anchors drift with every edit. In state files, anchors are fine for the current position.
+- New public functions, classes and methods get a docstring; when a docstring lists
+  parameters, keep it equal to the signature (the hook reports both).
+- Do not edit records (decision logs, ADRs, reviews) to fix old references: they describe the
+  past.
+
 ## Before finishing
 
 Run `codehealth diff --base <merge-base with the main branch>` (the repo's CI runs the
 same). It fails when debt over touched files rises, a new large file or brain function
-appears, a suppression is invalid, or (with `[architecture]`) a new import violation or
-cycle appears. Fix it, or report it to the user with the numbers. Never edit
+appears, a suppression is invalid, (with `[architecture]`) a new import violation or
+cycle appears, or (with `[docs]`) a doc reference rots or is invented, or a new public name
+lacks a docstring. Fix it, or report it to the user with the numbers. Never edit
 `.codehealth/config.toml` or the playbook to make it pass.
 
 ## Never

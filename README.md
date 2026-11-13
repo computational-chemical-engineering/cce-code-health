@@ -308,6 +308,41 @@ planned new file defines it with the identical API entry; new public names must 
 `new_public`, and each listed name must exist at head. Gate JSON `meta.plan` = {path, blob, id};
 `codehealth log` records class `restructure` (accepted needs a debt drop, as for refactor).
 
+### Documentation health
+
+```bash
+codehealth docs --stats            # references per docs class, kind, status and reason
+```
+
+An optional `[docs]` table (design and measurements: docs/DOCS_HEALTH.md) checks that
+documentation for humans and agents (README, docs/, CLAUDE.md, .claude/, notebooks) still
+points at real code:
+
+```toml
+[docs]
+include = ["README.md", "CLAUDE.md", "docs/**/*.md", ".claude/**/*.md"]
+exclude = ["CHANGELOG.md", "docs/archive/**"]
+records = ["docs/*DECISIONS*.md", "docs/adr/**"]   # history: only new references are checked
+python_roots = ["src"]
+anchors = "warn"                                   # anchor drift: or "fail"
+new = "warn"                                       # new unresolved references: or "fail"
+docstrings = true
+```
+
+References are inline code spans and link targets outside fenced blocks that look like a repo
+path (`src/pkg/x.py`, `pkg/x.py`, `x.py`, `dir/`), an anchor (`x.py:120`, `x.py:10-20,31`), a
+pytest id (`tests/test_x.py::test_y`) or a Python name of a repo package (`pkg.mod.func`,
+`pkg.mod:func`). `codehealth diff` fails when a reference that resolved at base no longer
+resolves (rot, also in untouched docs; warns for `_private` names and anchor lines). A newly
+written reference to a file, name or test that never existed warns (invented, or planned:
+briefs name files before they exist); `new = "fail"` makes it fail. Records get only that
+second check. Anchors into code that this change moved warn (`anchors = "fail"`
+fails), and docs referencing changed files are listed as "review". The gate's static check
+`docs` warns on rot (a step may not edit docs; fix it in a docs commit before merge). With `docstrings = true`, new public Python names need a docstring
+(D1) and a documented parameter list must match the signature (D2): in diff, the gate (check
+`docstrings`) and the edit hook. Existing gaps pass. Executable docs: wire the repo's own
+runner (example notebooks, snippet checks) in as a gate tier.
+
 ## Claude Code plugin
 
 ```

@@ -401,8 +401,27 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
     flags = flags_check(repo, base, cfg, changes)
     if flags is not None:
         checks.append(flags)
+    checks += docs_checks(repo, base, cfg, changes)
     checks.append(numeric_literals(py, tb, th))
     return checks
+
+
+def docs_checks(repo: Path, base: str, cfg: config.Config, changes) -> list[Check]:
+    """Static checks `docs` and `docstrings` (only with a `[docs]` table in the base config).
+    A step cannot edit docs (scope), so references that rot only warn here (docs debt, fixed in a
+    docs commit; CI `codehealth diff` over the whole branch fails on them); a new unresolved
+    reference fails only with `[docs] new = "fail"`."""
+    from . import docs, docstrings  # noqa: PLC0415
+    out = []
+    res = docs.compare(repo, base, None, cfg, rot="warn")
+    if res is not None:
+        items = res.failures + [f"warning: {w}" for w in res.warnings]
+        out.append(Check("docs", not res.failures, "; ".join(items[:5])
+                         + (f"; +{len(items) - 5} more" if len(items) > 5 else "")))
+    ds = docstrings.compare_refs(repo, base, None, cfg, changes)
+    if ds is not None:
+        out.append(Check("docstrings", not ds, "; ".join(ds[:5]) + (f"; +{len(ds) - 5} more" if len(ds) > 5 else "")))
+    return out
 
 
 def _numeric_constants(source: str) -> Counter:
@@ -1248,6 +1267,57 @@ def _literal_sites(source: str, line: int | None = None) -> list[tuple[int, int,
     return [s for s in out if s[3] not in (0, 1)]
 
 
+_CPP_NUM = re.compile(rb"(?<![\w.'])((?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?)([uUlLfF]{0,3})(?![\w.'])")
+
+
+def _cpp_blank(line: bytes, in_comment: bool) -> tuple[bytes, bool]:
+    """The line with comments, string and char literals replaced by spaces (same byte offsets)."""
+    out, i, n = bytearray(line), 0, len(line)
+    while i < n:
+        if in_comment:
+            j = line.find(b"*/", i)
+            end = n if j < 0 else j + 2
+            out[i:end] = b" " * (end - i)
+            in_comment, i = j < 0, end
+            continue
+        c = line[i:i + 1]
+        if line.startswith(b"//", i):
+            out[i:] = b" " * (n - i)
+            break
+        if line.startswith(b"/*", i):
+            in_comment = True
+            continue
+        if c in (b'"', b"'"):
+            j = i + 1
+            while j < n and line[j:j + 1] != c:
+                j += 2 if line[j:j + 1] == b"\\" else 1
+            out[i:min(j + 1, n)] = b" " * (min(j + 1, n) - i)
+            i = j + 1
+            continue
+        i += 1
+    return bytes(out), in_comment
+
+
+def _cpp_literal_sites(source: str, line: int) -> list[tuple[int, int, int, object]]:
+    """(lineno, col, end_col, value) of decimal numeric literals on one line of C/C++/CUDA
+    source, outside comments, strings and preprocessor lines; a suffix (f, u, L) stays."""
+    in_comment, sites = False, []
+    for i, raw in enumerate(source.encode().split(b"\n"), 1):
+        clean, in_comment = _cpp_blank(raw, in_comment)
+        if i != line:
+            continue
+        if clean.lstrip().startswith(b"#"):
+            return []
+        for m in _CPP_NUM.finditer(clean):
+            txt = m.group(1).decode()
+            if txt.startswith("0") and len(txt) > 1 and txt[1].isdigit():
+                continue                                   # octal: leave alone
+            is_float = any(ch in txt for ch in ".eE") or b"f" in m.group(2).lower()
+            sites.append((i, m.start(1), m.end(1), float(txt) if is_float else int(txt)))
+        break
+    return sites
+
+
 def mutate_source(source: str, site, nth: tuple[int, int] | None = None) -> tuple[str, str]:
     lineno, col, end, v = site
     new = repr(v + 1) if isinstance(v, int) else repr(v * 1.5 + 1.0)
@@ -1323,7 +1393,10 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
         gitio.git(tree, "clean", "-fdxq")   # drop stale bytecode: a same-size mutation keeps mtime and size
         target = None
         for p in candidates:
-            sites = _literal_sites((tree / p).read_text(), line)
+            if config.EXTENSIONS.get(Path(p).suffix) == "cpp":
+                sites = _cpp_literal_sites((tree / p).read_text(), line)
+            else:
+                sites = _literal_sites((tree / p).read_text(), line)
             if mutate and not 1 <= nth <= len(sites):
                 listing = ", ".join(f"{i} = {s[3]!r} at col {s[1] + 1}" for i, s in enumerate(sites, 1))
                 raise ValueError(f"--mutate {mutate}: literal {nth} not found on line {line} of {p} "
@@ -1332,7 +1405,8 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
                 target = (p, sites[nth - 1 if mutate else 0], (nth, len(sites)) if mutate else None)
                 break
         if target is None:
-            raise RuntimeError("self-test: no numeric literal found to mutate")
+            raise RuntimeError("self-test: no numeric literal found to mutate (C/C++: pass "
+                               "--mutate path:line[:N] on a literal the tests execute)")
         p, site, which = target
         text, what = mutate_source((tree / p).read_text(), site, which)
         (tree / p).write_text(text)

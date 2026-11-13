@@ -81,6 +81,14 @@ campaign is one of its work packages and follows those rules.
    `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it
    to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
 
+## Docs debt (repos with a `[docs]` table)
+
+A step never edits docs (scope). The gate's `docs` check warns when a step makes a doc
+reference rot (a moved private helper, a shifted anchor): note the warnings in the campaign
+log. Before the campaign's merge, fix them in one separate docs commit (it is not a refactor
+step; `codehealth diff` over the branch fails until it is done). Docs listed as "review" by
+`codehealth diff --base <campaign base>` are read once at campaign end.
+
 ## Restructure (splitting large files: human-approved)
 
 Debt inside a 1,000+ line module often needs new modules, which the refactor class forbids
