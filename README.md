@@ -53,6 +53,29 @@ line; the reason is mandatory and every new suppression is listed by `diff`:
 `# codehealth: allow params -- public API, kept for compatibility`.
 File-level smells use `allow-file`.
 
+### Change coupling
+
+```bash
+codehealth coupling --since 2026-01-01 --depth 3 --top 30
+```
+
+Files that change in the same commits (non-merge, renames followed, one `git log`).
+Degree = shared commits / mean revisions of the two files. Pairs over `--min-shared`
+(5) and `--min-degree` (0.5) are listed with a `cross-module` marker when the two
+modules differ (module = first `--depth` directory components, default the whole
+directory); a second table sums shared commits per module pair. Commits touching more
+than `--max-files-per-commit` (30) files, such as reformatting, are skipped. Only
+in-scope files at HEAD are considered. `--json FILE` writes both tables.
+
+### Cohesion (informational)
+
+`scan --json` lists per file `classes: [{name, line, end_line, methods, lcom4}]` and
+`max_lcom4`; `hotspots` shows `max_lcom4` as a column. LCOM4 is the number of connected
+components of a class's methods (excluding `__init__`, `__post_init__`, `__new__`),
+where methods connect through a shared `self.<attr>` (`cls.<attr>`) or a `self.<name>`
+call or access; `None` below 3 methods. 1 is cohesive, 2 or more suggests the class
+could be split. It never affects debt, health or the gates.
+
 ## Behaviour gate (0.2.0.dev)
 
 ```bash

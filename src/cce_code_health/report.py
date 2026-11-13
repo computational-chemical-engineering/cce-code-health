@@ -64,5 +64,7 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
             "file_smells": smells, "dup_fraction": round(dup_frac, 3),
             "health": round(max(1.0, 10.0 - penalty), 2),
             "functions": functions,
+            "classes": fm.classes,
+            "max_lcom4": max((c["lcom4"] for c in fm.classes if c["lcom4"] is not None), default=None),
             "suppressions": [{"line": a.line, "smells": list(a.smells), "reason": a.reason,
                               "valid": a.valid, "file_level": a.file_level} for a in fm.allows]}
