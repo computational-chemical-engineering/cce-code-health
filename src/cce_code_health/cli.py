@@ -152,9 +152,10 @@ def cmd_coupling(a) -> int:
     cfg = config.load(repo, None)
     keep = {p for p in gitio.ls_files(repo, None) if cfg.in_scope(p)}
     commits, skipped = coupling.commit_file_sets(repo, a.since, a.max_files_per_commit, keep.__contains__)
-    res = coupling.compute(commits, a.depth, a.min_shared, a.min_degree)
+    res = coupling.compute(commits, a.depth, a.min_shared, a.min_degree, a.include_test_pairs)
     write_json(a.json, {"meta": meta(repo, cfg, since=a.since, max_files_per_commit=a.max_files_per_commit,
                                      min_shared=a.min_shared, min_degree=a.min_degree, depth=a.depth,
+                                     include_test_pairs=a.include_test_pairs,
                                      commits=len(commits), skipped_commits=skipped), **res})
     print(f"{'file a':45} {'file b':45} {'shared':>6} {'degree':>6}")
     for x in res["pairs"][:a.top]:
@@ -366,6 +367,8 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--max-files-per-commit", type=int, default=30, help="skip larger commits (default 30)")
     pk.add_argument("--min-shared", type=int, default=5, help="min shared commits (default 5)")
     pk.add_argument("--min-degree", type=float, default=0.5, help="min coupling degree (default 0.5)")
+    pk.add_argument("--include-test-pairs", action="store_true",
+                    help="keep pairs of a test file with a non-test file (dropped by default)")
     pk.add_argument("--depth", type=int, help="module = first N directory components (default: whole directory)")
     pk.add_argument("--top", type=int, default=30)
     pc = sub.add_parser("config", help="validate the gate configuration")

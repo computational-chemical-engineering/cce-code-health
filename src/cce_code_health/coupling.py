@@ -61,14 +61,29 @@ def commit_file_sets(repo, since: str | None, max_files: int, keep) -> tuple[lis
     return commits, skipped
 
 
-def compute(commits: list[list[str]], depth: int | None, min_shared: int, min_degree: float) -> dict:
+def is_test(path: str) -> bool:
+    """Test file by convention: under a tests/ or test/ directory, or test_*/ *_test file."""
+    parts = path.split("/")
+    stem = parts[-1].rsplit(".", 1)[0]
+    return (any(d in ("tests", "test") for d in parts[:-1])
+            or stem.startswith("test_") or stem.endswith("_test"))
+
+
+def compute(commits: list[list[str]], depth: int | None, min_shared: int, min_degree: float,
+            include_test_pairs: bool = False) -> dict:
+    """Pairs of a test file with a non-test file change together by design; they are dropped
+    unless include_test_pairs."""
     revs: Counter = Counter()
     shared: Counter = Counter()
     for files in commits:
         revs.update(files)
         shared.update(combinations(files, 2))     # files are sorted, so a < b
     pairs = []
+    def keep(a: str, b: str) -> bool:
+        return include_test_pairs or is_test(a) == is_test(b)
     for (a, b), n in shared.items():
+        if not keep(a, b):
+            continue
         degree = n / ((revs[a] + revs[b]) / 2)
         if n >= min_shared and degree >= min_degree:
             ma, mb = module_of(a, depth), module_of(b, depth)
@@ -79,7 +94,7 @@ def compute(commits: list[list[str]], depth: int | None, min_shared: int, min_de
     mods: Counter = Counter()
     for (a, b), n in shared.items():
         ma, mb = module_of(a, depth), module_of(b, depth)
-        if ma != mb:
+        if ma != mb and keep(a, b):
             mods[tuple(sorted((ma, mb)))] += n
     module_pairs = [{"a": a, "b": b, "shared": n} for (a, b), n in
                     sorted(mods.items(), key=lambda kv: (-kv[1], kv[0]))]

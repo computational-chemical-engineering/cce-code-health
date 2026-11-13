@@ -3,3 +3,4 @@ __pycache__/
 *.log
 baselines/*/*.json
 *.egg-info/
+.claude/worktrees/

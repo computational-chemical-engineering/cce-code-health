@@ -88,3 +88,13 @@ def test_depth_merges_modules(tmp_path, capsys):
         commit(repo, {"s/a/x.py": f"v={i}\n", "s/b/y.py": f"v={i}\n"})
     assert run(repo, capsys)["pairs"][0]["cross_module"] is True
     assert run(repo, capsys, "--depth", "1")["pairs"][0]["cross_module"] is False
+
+
+def test_test_pairs_dropped_by_default():
+    from cce_code_health.coupling import compute, is_test
+    assert is_test("tests/test_x.py") and is_test("src/x_test.cpp") and not is_test("src/x.py")
+    commits = [["src/a.py", "src/b.py", "tests/test_a.py"]] * 6
+    pairs = {(p["a"], p["b"]) for p in compute(commits, None, 5, 0.5)["pairs"]}
+    assert pairs == {("src/a.py", "src/b.py")}
+    pairs = {(p["a"], p["b"]) for p in compute(commits, None, 5, 0.5, include_test_pairs=True)["pairs"]}
+    assert ("src/a.py", "tests/test_a.py") in pairs
