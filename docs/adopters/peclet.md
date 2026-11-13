@@ -74,6 +74,15 @@ onboarding itself is a work package for a Peclet session, under Peclet's own pro
   helper (count per check, base vs head); a convergence-order helper (observed order from
   (h, error) pairs, compared against a declared band); cpp@0 calibration against CodeScene.
 
+## Open issues for C++
+
+- Restructure with a new `.cpp` translation unit needs a CMake source-list edit, which the
+  scope rule (and possibly the flags check) refuses. Header-only moves work. Option: let a
+  restructure plan list `build_files` whose edits may only add the planned sources.
+- clang-tidy prints several checks in one bracket (`[a,b]`): the findings tier treats it as
+  one check string.
+- cpp@0 nesting tokenises both `#if`/`#else` branches.
+
 ## Smoke scan
 
 cpp@0 on GitHub main clones of peclet-core, -flow, -dem and -voro (2026-11-13, scope
