@@ -38,7 +38,7 @@ jobs:
       - name: Install codehealth
         env:
           CH_REF: ${{ inputs.codehealth-ref }}
-        run: pip install "git+https://github.com/computational-chemical-engineering/cce-code-health@${CH_REF}"
+        run: pip install "cce-code-health[cpp] @ git+https://github.com/computational-chemical-engineering/cce-code-health@${CH_REF}"
       - name: codehealth diff
         env:
           BASE: ${{ inputs.base-ref || github.base_ref || 'main' }}

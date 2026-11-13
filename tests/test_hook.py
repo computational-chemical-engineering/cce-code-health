@@ -171,3 +171,30 @@ def test_post_edit_script(repo):
     assert r.returncode == 0
     r = subprocess.run(["sh", str(SCRIPT)], input="garbage", text=True, capture_output=True)
     assert (r.returncode, r.stderr) == (0, "")
+
+
+def fake_bin(tmp_path, stderr, rc):
+    b = tmp_path / "fakebin"
+    b.write_text(f"#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' {stderr!r} >&2\nexit {rc}\n")
+    b.chmod(0o755)
+    return {"CODEHEALTH_BIN": str(b)}
+
+
+@pytest.mark.parametrize("stderr", [
+    "usage: codehealth [-h] {scan,diff}\ncodehealth: error: argument command: invalid choice: 'hook'",
+    "codehealth: error: argument command: invalid choice: 'hook'",
+    "Traceback (most recent call last):"])
+def test_post_edit_script_ignores_foreign_exit_2(repo, tmp_path_factory, stderr):
+    env = fake_bin(tmp_path_factory.mktemp("bin"), stderr, 2)
+    r = run_script(repo, "a.py", env)
+    assert (r.returncode, r.stderr) == (0, "")
+
+
+def test_post_edit_script_relays_report_only_with_config_and_py(repo, tmp_path_factory):
+    env = fake_bin(tmp_path_factory.mktemp("bin"), "codehealth: a.py: debt 0.0 -> 3.0", 2)
+    r = run_script(repo, "a.py", env)
+    assert r.returncode == 2 and "codehealth: a.py: debt" in r.stderr
+    assert run_script(repo, "notes.md", env).returncode == 0
+    assert run_script(repo, "a.py", fake_bin(tmp_path_factory.mktemp("bin"), "codehealth: x", 1)).returncode == 0
+    (repo / ".codehealth/config.toml").unlink()
+    assert run_script(repo, "a.py", env).returncode == 0

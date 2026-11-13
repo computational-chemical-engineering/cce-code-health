@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post_edit.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/post_edit.sh\"",
             "timeout": 10
           }
         ]
