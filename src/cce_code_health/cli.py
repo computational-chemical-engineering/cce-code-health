@@ -20,6 +20,14 @@ from .report import file_report
 EPS = 1e-9
 
 
+def _load(a, repo: Path, ref: str | None) -> config.Config:
+    """The repo's config at ref, or a trial config file (scan, hotspots) for a read-only look."""
+    path = getattr(a, "trial_config", None)
+    if path:
+        return config.parse(Path(path).read_text(), f"trial:{path}")
+    return config.load(repo, ref)
+
+
 def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
                 only: set[str] | None = None) -> dict[str, dict]:
     """Reports for in-scope files at ref (None = worktree). Duplication uses the whole scope
@@ -81,7 +89,7 @@ def write_json(path: str | None, data: dict) -> None:
 def cmd_scan(a) -> int:
     repo = Path(a.repo).resolve()
     ref = gitio.rev(repo, a.ref) if a.ref else None
-    cfg = config.load(repo, ref)
+    cfg = _load(a, repo, ref)
     reports = analyze_ref(repo, ref, cfg)
     t = totals(reports)
     write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), "totals": t, "files": reports})
@@ -175,7 +183,7 @@ def cmd_arch(a) -> int:
 
 def cmd_hotspots(a) -> int:
     repo = Path(a.repo).resolve()
-    cfg = config.load(repo, None)
+    cfg = _load(a, repo, None)
     reports = analyze_ref(repo, None, cfg)
     counts = gitio.commit_counts(repo, a.since)
     rows = sorted(({"path": p, "commits": counts.get(p, 0), "debt": r["debt"],
@@ -406,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--json", help="write the full report to this file")
         if name in ("scan", "hotspots"):
             p.add_argument("--top", type=int, default=20)
+            p.add_argument("--config", dest="trial_config",
+                           help="read-only trial: use this config file instead of the repo's")
     pk = sub.add_parser("coupling", help="change coupling: files that change together in history")
     pk.set_defaults(fn=cmd_coupling)
     pk.add_argument("--repo", default=".")

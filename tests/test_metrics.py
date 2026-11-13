@@ -101,3 +101,21 @@ def test_debt_uncapped_and_suppression():
     bad = "# codehealth: allow params\n" + many
     r = file_report(analyze("x.py", bad), 0, P)
     assert r["debt"] == 4.0 and not r["suppressions"][0]["valid"]
+
+
+def test_scan_with_trial_config_reads_nothing_from_repo(tmp_path, capsys):
+    import json
+    import subprocess
+    from cce_code_health.cli import main
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.py").write_text("def f(x):\n    return x\n")
+    (repo / "skip.py").write_text("def g(x):\n    return x\n")
+    cfg = tmp_path / "trial.toml"
+    cfg.write_text('schema = 1\n[scope]\ninclude = ["a.py"]\n')
+    out = tmp_path / "s.json"
+    assert main(["scan", "--repo", str(repo), "--config", str(cfg), "--json", str(out)]) == 0
+    files = json.loads(out.read_text())["files"]
+    assert sorted(files) == ["a.py"]
+    assert not (repo / ".codehealth").exists()
