@@ -38,6 +38,13 @@ def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
             for path in files if path in texts and (only is None or path in only)}
 
 
+def new_errors(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[str]:
+    """Head files whose analysis failed (parse, complexipy, lizard) while their base version's
+    did not: such a file scores 0 debt, so the debt ratchet must not count it as clean."""
+    return [f"{hp}: analysis error: {rh[hp]['error']}" for _, bp, hp in changes
+            if hp in rh and rh[hp]["error"] and not (bp in rb and rb[bp]["error"])]
+
+
 def _analyze(path: str, text: str, p):
     if p.language == "cpp":
         from .cpp_backend import analyze as analyze_cpp  # noqa: PLC0415 (needs lizard)
@@ -105,6 +112,7 @@ def cmd_diff(a) -> int:
     failures = []
     if dh > db + EPS:
         failures.append(f"debt over touched files rose {db:.2f} -> {dh:.2f}")
+    failures += new_errors(rb, rh, ch)
     counterpart = {c[2]: c[1] for c in ch if c[2]}
     base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
     rows = []

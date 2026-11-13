@@ -218,3 +218,26 @@ def test_python_report_keys_unchanged():
     assert list(r["functions"][0]) == ["name", "qualname", "line", "end_line", "nloc", "cognitive",
                                        "nesting", "bumps", "params", "boolops", "debt",
                                        "debt_parts", "brain"]
+
+
+CPP_GATE = CFG + '[profiles]\ncpp = "cpp@0"\n[gate]\nliterals = true\npublic_api = true\n'
+
+
+def test_static_rules_say_cpp_unchecked(mixed):
+    cfg = config.parse(CPP_GATE, "t")
+    checks = {c.name: c for c in gatemod.static_checks(mixed, gitio.rev(mixed, "HEAD"), cfg,
+                                                       [("M", "src/g.cpp", "src/g.cpp")])}
+    assert checks["public_api"].ok and checks["public_api"].detail == "not checked: 1 C++ file(s)"
+    assert checks["literals"].ok and checks["literals"].detail == "not checked: 1 C++ file(s)"
+    info, bad = config.check(CPP_GATE)
+    assert bad == [] and sum(line.startswith("WARNING [gate]") for line in info) == 2
+    assert not any("WARNING" in line for line in config.check(CFG + '[profiles]\ncpp = "cpp@0"\n')[0])
+
+
+def test_python_to_cpp_rename_checks_removed_api(mixed):
+    git(mixed, "mv", "src/a.py", "src/a.cpp")
+    cfg = config.parse(CPP_GATE, "t")
+    checks = {c.name: c for c in gatemod.static_checks(mixed, gitio.rev(mixed, "HEAD"), cfg,
+                                                       [("R", "src/a.py", "src/a.cpp")])}
+    assert not checks["public_api"].ok
+    assert "src/a.py: module moved to src/a.cpp" in checks["public_api"].detail

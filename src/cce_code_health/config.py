@@ -149,6 +149,9 @@ def check(text: str) -> tuple[list[str], list[str]]:
             arch = data["architecture"]
             info.append(f"architecture: {len(arch.get('layers', []))} layer rule(s), "
                         f"{len(arch.get('forbid', []))} forbid rule(s), cycle_depth {arch.get('cycle_depth', 2)}")
+    if isinstance(data.get("profiles"), dict) and "cpp" in data["profiles"]:
+        info += [f"WARNING [gate] {k} = true is not checked for C++ files (Python only; the check "
+                 f"passes and says 'not checked')" for k in ("public_api", "literals") if gate.get(k)]
     tiers = gate.get("tier", [])
     names = [t.get("name") for t in tiers]
     bad += [f"duplicate tier name {n!r}" for n in sorted({n for n in names if names.count(n) > 1})]

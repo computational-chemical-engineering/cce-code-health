@@ -310,11 +310,21 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
 
     roots = (cfg.architecture or {}).get("roots", ["."])
-    # Python-only rules: C++ static rules (public headers, literals) are not implemented yet.
+    # Python-only rules: C++ static rules (public headers, literals) are not implemented yet;
+    # their checks pass and say how many touched C++ files went unchecked. A pair with a .py
+    # side (a.py -> a.cpp included) is checked, so a Python API removed by the rename counts.
+    def is_py(p):
+        return bool(p) and p.endswith(".py")
     py = [(bp, hp) for _, bp, hp in changes
-          if ((bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))) and (hp or bp).endswith(".py")]
-    tb = gitio.read_files(repo, base, [bp for bp, _ in py if bp])
-    th = gitio.read_files(repo, None, [hp for _, hp in py if hp])
+          if ((bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))) and (is_py(bp) or is_py(hp))]
+    tb = gitio.read_files(repo, base, [bp for bp, _ in py if is_py(bp)])
+    th = gitio.read_files(repo, None, [hp for _, hp in py if is_py(hp)])
+    n_cpp = len({p for _, bp, hp in changes for p in (bp, hp)
+                 if p and cfg.in_scope(p) and config.EXTENSIONS.get(Path(p).suffix) == "cpp"})
+    unchecked = f"not checked: {n_cpp} C++ file(s)" if n_cpp else ""
+
+    def with_cpp(detail):
+        return "; ".join(x for x in (detail, unchecked) if x)
     if g.get("literals", False):
         lb, lh = Counter(), Counter()
         for t in tb.values():
@@ -323,10 +333,10 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
             lh += _string_literals(t)
         gone, new = lb - lh, lh - lb
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
-        checks.append(Check("literals", not gone and not new, detail[:400]))
+        checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
     if g.get("public_api", False) and plan is not None:
         problems = restructure.public_api_problems(plan, py, tb, th, _public_api, roots)
-        checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
+        checks.append(Check("public_api", not problems, with_cpp("; ".join(problems[:5]))))
     elif g.get("public_api", False):
         problems = []
         for bp, hp in py:
@@ -341,7 +351,7 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
                 elif ah[name] != s:
                     problems.append(f"{where}: {name}{s} -> {ah[name]}")
             problems += [f"{where}: {n} added (make it private?)" for n in ah if n not in ab]
-        checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
+        checks.append(Check("public_api", not problems, with_cpp("; ".join(problems[:5]))))
     moved_to = set()
     if plan is not None:
         mods = [architecture.module_name(p, roots) for p in restructure.added_paths(changes)
@@ -811,13 +821,17 @@ def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, 
 
 
 def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> tuple[Check, float, float]:
-    """Debt over the touched in-scope files must not rise (both modes): (check, before, after)."""
-    from .cli import analyze_ref  # noqa: PLC0415 (cli imports this module)
+    """Debt over the touched in-scope files must not rise, and no touched file may newly fail
+    analysis (it would score 0 debt), in every mode: (check, before, after)."""
+    from .cli import analyze_ref, new_errors  # noqa: PLC0415 (cli imports this module)
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
-    db = sum(r["debt"] for r in analyze_ref(repo, base, cfg, bp).values())
-    dh = sum(r["debt"] for r in analyze_ref(repo, None, cfg, hp).values())
-    return Check("debt", dh <= db + 1e-9, f"{db:.1f} -> {dh:.1f}"), db, dh
+    rb, rh = analyze_ref(repo, base, cfg, bp), analyze_ref(repo, None, cfg, hp)
+    db = sum(r["debt"] for r in rb.values())
+    dh = sum(r["debt"] for r in rh.values())
+    errors = new_errors(rb, rh, changes)
+    return (Check("debt", dh <= db + 1e-9 and not errors,
+                  "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3])), db, dh)
 
 
 def _git_rc(repo: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:

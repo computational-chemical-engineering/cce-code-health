@@ -214,3 +214,21 @@ cmd = '{PY} -c "import pkg.mod as m; assert m.calc(3) == 10"'
     weak = cfg.replace("m.calc(3) == 10", "True")
     commit(tmp_path, {".codehealth/config.toml": weak})
     assert main(["gate", "--repo", str(tmp_path), "--self-test", "--log", log]) == 1
+
+
+def test_debt_fails_when_analysis_newly_errors(repo, capsys, monkeypatch):
+    from cce_code_health import python_backend
+    real = python_backend.analyze
+
+    def flaky(path, text, *a, **kw):
+        fm = real(path, text, *a, **kw)
+        if "BOOM" in text:
+            fm.error, fm.functions = "complexipy: boom", []
+        return fm
+    monkeypatch.setattr("cce_code_health.cli.analyze", flaky)
+    edit(repo, "pkg/mod.py", MOD + "# BOOM\n")
+    assert gate(repo) == 1
+    out = capsys.readouterr().out
+    assert "FAIL debt" in out and "pkg/mod.py: analysis error: complexipy: boom" in out
+    assert main(["diff", "--repo", str(repo)]) == 1
+    assert "FAIL pkg/mod.py: analysis error: complexipy: boom" in capsys.readouterr().out
