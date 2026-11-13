@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tempfile
 
-from . import __version__, config, gitio
+from . import __version__, config, coupling, gitio
 from . import gate as gatemod
 from .hook import cmd_hook
 from .duplication import duplicated_lines
@@ -134,14 +134,38 @@ def cmd_hotspots(a) -> int:
     counts = gitio.commit_counts(repo, a.since)
     rows = sorted(({"path": p, "commits": counts.get(p, 0), "debt": r["debt"],
                     "health": r["health"], "nloc": r["nloc"],
-                    "rank": counts.get(p, 0) * r["debt"]} for p, r in reports.items()),
+                    "rank": counts.get(p, 0) * r["debt"],
+                    "max_lcom4": r["max_lcom4"]} for p, r in reports.items()),
                   key=lambda x: -x["rank"])
     write_json(a.json, {"meta": meta(repo, cfg, since=a.since), "hotspots": rows})
-    print(f"{'file':60} {'commits':>7} {'debt':>8} {'health':>6} {'rank':>9}")
+    print(f"{'file':60} {'commits':>7} {'debt':>8} {'health':>6} {'rank':>9} {'lcom4':>5}")
     for x in rows[:a.top]:
-        print(f"{x['path'][-60:]:60} {x['commits']:7} {x['debt']:8.1f} {x['health']:6.1f} {x['rank']:9.0f}")
+        lc = "-" if x["max_lcom4"] is None else x["max_lcom4"]
+        print(f"{x['path'][-60:]:60} {x['commits']:7} {x['debt']:8.1f} {x['health']:6.1f} {x['rank']:9.0f} {lc:>5}")
     print(f"HOTSPOTS {repo.name}: {len(rows)} files ranked by commits x debt"
           + (f" since {a.since}" if a.since else ""))
+    return 0
+
+
+def cmd_coupling(a) -> int:
+    repo = Path(a.repo).resolve()
+    cfg = config.load(repo, None)
+    keep = {p for p in gitio.ls_files(repo, None) if cfg.in_scope(p)}
+    commits, skipped = coupling.commit_file_sets(repo, a.since, a.max_files_per_commit, keep.__contains__)
+    res = coupling.compute(commits, a.depth, a.min_shared, a.min_degree)
+    write_json(a.json, {"meta": meta(repo, cfg, since=a.since, max_files_per_commit=a.max_files_per_commit,
+                                     min_shared=a.min_shared, min_degree=a.min_degree, depth=a.depth,
+                                     commits=len(commits), skipped_commits=skipped), **res})
+    print(f"{'file a':45} {'file b':45} {'shared':>6} {'degree':>6}")
+    for x in res["pairs"][:a.top]:
+        print(f"{x['a'][-45:]:45} {x['b'][-45:]:45} {x['shared']:6} {x['degree']:6.2f}"
+              + ("  cross-module" if x["cross_module"] else ""))
+    if res["module_pairs"]:
+        print(f"\n{'module a':45} {'module b':45} {'shared':>6}")
+        for x in res["module_pairs"][:a.top]:
+            print(f"{x['a'][-45:]:45} {x['b'][-45:]:45} {x['shared']:6}")
+    print(f"COUPLING {repo.name}: {len(res['pairs'])} file pairs over thresholds, "
+          f"{len(res['module_pairs'])} cross-module pairs, {len(commits)} commits used, {skipped} skipped (large)")
     return 0
 
 
@@ -334,6 +358,16 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--json", help="write the full report to this file")
         if name in ("scan", "hotspots"):
             p.add_argument("--top", type=int, default=20)
+    pk = sub.add_parser("coupling", help="change coupling: files that change together in history")
+    pk.set_defaults(fn=cmd_coupling)
+    pk.add_argument("--repo", default=".")
+    pk.add_argument("--json", help="write the full report to this file")
+    pk.add_argument("--since", help="only use commits since this date")
+    pk.add_argument("--max-files-per-commit", type=int, default=30, help="skip larger commits (default 30)")
+    pk.add_argument("--min-shared", type=int, default=5, help="min shared commits (default 5)")
+    pk.add_argument("--min-degree", type=float, default=0.5, help="min coupling degree (default 0.5)")
+    pk.add_argument("--depth", type=int, help="module = first N directory components (default: whole directory)")
+    pk.add_argument("--top", type=int, default=30)
     pc = sub.add_parser("config", help="validate the gate configuration")
     pc.set_defaults(fn=cmd_config)
     pc.add_argument("--repo", default=".")

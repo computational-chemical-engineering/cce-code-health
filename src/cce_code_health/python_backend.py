@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 import complexipy
 
+from . import cohesion
 from .profiles import METRICS
 
 # Nesting counts branches, loops and exception handling, not context managers.
@@ -63,6 +64,7 @@ class FileMetrics:
     functions: list
     allows: list           # all allow comments in the file
     error: str | None = None
+    classes: list = field(default_factory=list)   # LCOM4 per class, informational
 
 
 def nesting_depth(node: ast.AST, depth: int = 0) -> int:
@@ -175,4 +177,4 @@ def analyze(path: str, source: str, varargs_weight: int = 3) -> FileMetrics:
             nesting=nesting_depth(node), bumps=bumps(node),
             params=params(node, varargs_weight), boolops=boolops(node),
             allows=fn_allows))
-    return FileMetrics(path, len(lines), funcs, allows, error)
+    return FileMetrics(path, len(lines), funcs, allows, error, cohesion.classes(tree))
