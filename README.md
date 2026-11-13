@@ -32,7 +32,14 @@ Exit codes: 0 pass, 1 regression, 2 tool error.
 **Debt** is the quantity that is gated: per function, the weighted excess over thresholds
 for cognitive complexity, lines of code, nesting, bumpy road, parameters and boolean
 operators per condition (profile `python@0`, see `src/cce_code_health/profiles.py`).
-The 1..10 **health** value is for display only.
+The 1..10 **health** value is for display only. It measures something different: per file, 10
+minus a penalty per smelly function (brain 1.0, complex and deep nesting 0.5, bumpy road 0.5,
+long 0.3, many parameters 0.2, each capped per file) and per file smell, averaged over files
+weighted by NLOC. Debt measures how far functions exceed the thresholds; health counts how many
+places do. Splitting one brain function into two smaller brain functions lowers debt and
+health together, on purpose: a reader now has two hard places instead of one (Peclet dem S3:
+debt -15, brain functions 12 -> 15, health 5.49 -> 4.98). Such a step is an intermediate; the
+follow-up brings the new functions under the brain thresholds, and health recovers.
 
 `diff` compares the merge-base of `--base` and head (default: working tree) and uses the
 base's `.codehealth/config.toml`. It fails if debt over the touched files rises, a file

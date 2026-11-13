@@ -145,3 +145,13 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
   follow-up splits it by mode. VelocitySolveContext has 24 by-value members, no references, 0
   ctx uses in lambda bodies. Tool: log `relocated` (new functions' debt / target drop) added
   from this (0.99, 0.95, 0.0 for the three steps). CUDA device check pending.
+- S3 CUDA device check (RTX 5080, base 07f9dc5 vs head d9e8aa8): ctest 303/303 both sides. GPU
+  state_hash is NOT deterministic run to run (3 base runs all differ), so envelope mode was used:
+  max|delta| within-base / within-head / base-vs-head: hertz 2.2e-4 / 1.1e-4 / 2.5e-4,
+  mpi_hertz_np1 2.1e-4 / 5.1e-4 / 4.9e-4, np2 4.9e-4 / 5.0e-4 / 5.7e-4; XPBD scenes about 1-8 in
+  all three (chaotic: catches gross failure only). Head within 1.16x of the envelope; criterion
+  <= 1.5x was set after seeing the numbers (logged as such), fixed from S4 on. Negative result
+  for a device reference tier: a bitwise GPU tier is not possible for dem; a tolerance tier
+  would need run-to-run envelopes per scenario and is weak for chaotic scenes.
+- S3 end: dem debt 1784.6, brain 12 -> 15, health 5.49 -> 4.98 (relocation 95-99 %). S4
+  (WO-5) splits stabilizeVelocityPhase by mode, each helper under CCN 25 / NLOC 70, pin 00b1849.
