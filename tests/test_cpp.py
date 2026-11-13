@@ -241,3 +241,15 @@ def test_python_to_cpp_rename_checks_removed_api(mixed):
                                                        [("R", "src/a.py", "src/a.cpp")])}
     assert not checks["public_api"].ok
     assert "src/a.py: module moved to src/a.cpp" in checks["public_api"].detail
+
+
+def test_binding_module_length_is_not_debt():
+    body = "\n".join(f'    m.def("f{i}", &f{i});' for i in range(120))
+    src = f"#include <nanobind/nanobind.h>\nNB_MODULE(_core, m) {{\n{body}\n}}\n"
+    fm = analyze("src/bind.cpp", src)
+    fn = next(f for f in fm.functions if f.name.endswith("NB_MODULE"))
+    p = get("cpp@0")
+    assert fn.nloc > 100
+    debt, parts = function_debt(fn, p)
+    assert "nloc" not in parts and debt == 0
+    assert not is_brain(fn, p)

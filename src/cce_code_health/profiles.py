@@ -34,6 +34,10 @@ class Profile:
     language: str = "python"       # backend; config.EXTENSIONS maps file suffixes to languages
     metrics: tuple = METRICS       # debt-carrying function metrics, in report order
     brain_metric: str = "cognitive"
+    # Flat registration tables (Python binding modules): their length is not a smell, so
+    # nloc carries no debt and does not make them brain functions. Matched on the last
+    # component of the qualified name.
+    table_functions: frozenset = frozenset()
 
 
 PROFILES = {
@@ -47,6 +51,7 @@ PROFILES = {
         thresholds=dict(ccn=10, nloc=70, nesting=3, params=5),
         weights=dict(ccn=1.0, nloc=0.1, nesting=3.0, params=1.0),
         brain_threshold=25, language="cpp", metrics=CPP_METRICS, brain_metric="ccn",
+        table_functions=frozenset({"NB_MODULE", "PYBIND11_MODULE", "BOOST_PYTHON_MODULE"}),
     ),
 }
 

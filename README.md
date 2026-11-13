@@ -94,7 +94,9 @@ include = ["include/*.hpp", "src/*.cpp", "src/*.hpp"]
 Profile `cpp@0` is uncalibrated (thresholds and weights by analogy with `python@0`). Debt per
 function: cyclomatic complexity (lizard's CCN, which counts if, for, while, case, catch, `&&`,
 `||` and `?`) above 10, weight 1; NLOC above 70, weight 0.1; nesting above 3, weight 3;
-parameters above 5, weight 1. A brain function has CCN > 25 and NLOC > 70. File smells as for
+parameters above 5, weight 1. A brain function has CCN > 25 and NLOC > 70. Binding modules
+(`NB_MODULE`, `PYBIND11_MODULE`, `BOOST_PYTHON_MODULE`) are flat registration tables: their
+length carries no debt and does not make them brain functions; their CCN still counts. File smells as for
 Python: large above 1000 NLOC, huge above 2000, duplication above 10 % (8-line windows,
 comments ignored). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
 towards the enclosing function. Nesting is computed by codehealth, not lizard: if, for, while,

@@ -13,9 +13,16 @@ def allowed(allows, metric: str) -> bool:
     return any(a.valid and (metric in a.smells or "all" in a.smells) for a in allows)
 
 
+def _is_table(fn: FunctionMetrics, p: Profile) -> bool:
+    return bool(p.table_functions) and fn.name.rsplit("::", 1)[-1].rsplit(".", 1)[-1] in p.table_functions
+
+
 def function_debt(fn: FunctionMetrics, p: Profile) -> tuple[float, dict]:
     parts = {}
+    table = _is_table(fn, p)
     for m in p.metrics:
+        if table and m == "nloc":
+            continue
         excess = fn.value(m) - p.thresholds[m]
         if excess > 0 and not allowed(fn.allows, m):
             parts[m] = round(p.weights[m] * excess, 3)
@@ -23,7 +30,8 @@ def function_debt(fn: FunctionMetrics, p: Profile) -> tuple[float, dict]:
 
 
 def is_brain(fn: FunctionMetrics, p: Profile) -> bool:
-    return (fn.value(p.brain_metric) > p.brain_threshold and fn.nloc > p.brain_nloc
+    return (not _is_table(fn, p) and fn.value(p.brain_metric) > p.brain_threshold
+            and fn.nloc > p.brain_nloc
             and not allowed(fn.allows, p.brain_metric))
 
 
