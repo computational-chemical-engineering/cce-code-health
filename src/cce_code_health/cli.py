@@ -12,6 +12,7 @@ import tempfile
 
 from . import __version__, config, gitio
 from . import gate as gatemod
+from .hook import cmd_hook
 from .duplication import duplicated_lines
 from .python_backend import analyze
 from .report import file_report
@@ -339,6 +340,9 @@ def main(argv: list[str] | None = None) -> int:
     pc.add_argument("--json", help=argparse.SUPPRESS)
     pc.add_argument("--check", action="store_true", help="validate .codehealth/config.toml")
     pc.add_argument("--config", help="validate this file instead of the working tree's config")
+    ph = sub.add_parser("hook", help="Claude Code PostToolUse hook: per-file debt feedback from stdin JSON")
+    ph.set_defaults(fn=cmd_hook)
+    ph.add_argument("--base", default="HEAD", help="ref to compare the edited file against (default HEAD)")
     pl = sub.add_parser("log", help="append one validated line to a campaign run log")
     pl.set_defaults(fn=cmd_log)
     pl.add_argument("--repo", default=".")

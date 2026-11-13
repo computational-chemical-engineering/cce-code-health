@@ -1,0 +1,50 @@
+# Reusable code-health ratchet for pull requests. Usage in an adopting repo
+# (.github/workflows/codehealth.yml), pinned by commit sha:
+#
+#   name: codehealth
+#   on: pull_request
+#   jobs:
+#     codehealth:
+#       uses: computational-chemical-engineering/cce-code-health/.github/workflows/codehealth-diff.yml@<sha>
+#       with:
+#         codehealth-ref: <sha>
+#         python-version: "3.12"   # optional
+#         base-ref: main           # optional, default: the PR base branch
+name: codehealth-diff
+on:
+  workflow_call:
+    inputs:
+      codehealth-ref:
+        description: Git ref or sha of cce-code-health to install
+        required: true
+        type: string
+      python-version:
+        type: string
+        default: "3.12"
+      base-ref:
+        description: "Base branch to compare against (default: the PR base, else main)"
+        type: string
+        default: ""
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install codehealth
+        env:
+          CH_REF: ${{ inputs.codehealth-ref }}
+        run: pip install "git+https://github.com/computational-chemical-engineering/cce-code-health@${CH_REF}"
+      - name: codehealth diff
+        env:
+          BASE: ${{ inputs.base-ref || github.base_ref || 'main' }}
+        run: |
+          status=0
+          codehealth diff --base "origin/${BASE}" > codehealth-diff.txt 2>&1 || status=$?
+          cat codehealth-diff.txt
+          { echo '```'; cat codehealth-diff.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

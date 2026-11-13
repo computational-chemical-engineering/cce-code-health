@@ -41,6 +41,7 @@ class Config:
     exclude: list = field(default_factory=list)
     source: str = "default"
     gate: dict = field(default_factory=dict)   # raw [gate] table, interpreted by gate.py
+    hook: dict = field(default_factory=dict)   # raw [hook] table, interpreted by hook.py
 
     def in_scope(self, path: str) -> bool:
         return (Path(path).suffix in EXTENSIONS
@@ -56,7 +57,7 @@ def parse(text: str, source: str) -> Config:
     return Config(profile=profiles.get(data.get("profile", "python@0")),
                   include=list(scope.get("include", ["*"])),
                   exclude=list(scope.get("exclude", [])), source=source,
-                  gate=dict(data.get("gate", {})))
+                  gate=dict(data.get("gate", {})), hook=dict(data.get("hook", {})))
 
 
 def load(repo: Path, ref: str | None) -> Config:
@@ -67,7 +68,8 @@ def load(repo: Path, ref: str | None) -> Config:
     return parse(texts[CONFIG_PATH], f"{ref or 'worktree'}:{CONFIG_PATH}")
 
 
-TOP_KEYS = {"schema", "profile", "scope", "gate"}
+TOP_KEYS = {"schema", "profile", "scope", "gate", "hook"}
+HOOK_KEYS = {"enabled"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
              "env", "tier"}
@@ -96,6 +98,10 @@ def check(text: str) -> tuple[list[str], list[str]]:
     scope, gate = data.get("scope", {}), data.get("gate", {})
     bad += [f"unknown key {k!r} in [scope]" for k in sorted(set(scope) - SCOPE_KEYS)]
     bad += [f"unknown key {k!r} in [gate]" for k in sorted(set(gate) - GATE_KEYS)]
+    hook = data.get("hook", {})
+    bad += [f"unknown key {k!r} in [hook]" for k in sorted(set(hook) - HOOK_KEYS)]
+    if "enabled" in hook and not isinstance(hook["enabled"], bool):
+        bad.append(f"[hook] enabled must be a bool, got {hook['enabled']!r}")
     tiers = gate.get("tier", [])
     names = [t.get("name") for t in tiers]
     bad += [f"duplicate tier name {n!r}" for n in sorted({n for n in names if names.count(n) > 1})]
