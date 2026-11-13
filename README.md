@@ -150,3 +150,37 @@ See the docstring of `src/cce_code_health/gate.py` for the config format.
 
 Skills: `optimize-loop` (performance campaign; tolerances are declared by a human, never by
 the loop). `refactor-loop`, `setup` and `healthy-coding` follow.
+
+## Edit-time feedback (Claude Code hook)
+
+The plugin registers a PostToolUse hook (`Edit|Write|MultiEdit`) that runs `codehealth hook`
+after each edit of a `.py` file. It compares the file with its version at `HEAD` (per file only:
+no duplication, no repo scan) and, when the edit raised the file's debt, added a function with
+debt, a brain function, a file smell (large/huge) or an invalid suppression, prints a short
+report to stderr and exits 2, so Claude Code shows it to the model. Otherwise it is silent. It
+needs a `.codehealth/config.toml` in the repo and never blocks on an internal error.
+
+`hooks/post_edit.sh` picks the binary in this order: `$CODEHEALTH_BIN`,
+`<repo>/.venv-codehealth/bin/codehealth`, `codehealth` on `PATH`; if none exists it does nothing.
+
+Disable it with the environment variable `CODEHEALTH_HOOK=0`, or per repo in the config:
+
+```toml
+[hook]
+enabled = false
+```
+
+## CI
+
+A reusable workflow runs the `codehealth diff` ratchet on pull requests and writes the output to
+the job summary. Call it from the adopting repo, pinned by sha:
+
+```yaml
+jobs:
+  codehealth:
+    uses: computational-chemical-engineering/cce-code-health/.github/workflows/codehealth-diff.yml@<sha>
+    with:
+      codehealth-ref: <sha>      # version of cce-code-health to install
+      # python-version: "3.12"
+      # base-ref: main           # default: the PR base branch
+```
