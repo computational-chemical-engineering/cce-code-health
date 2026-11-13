@@ -4,7 +4,9 @@ import pytest
 from test_gate import CONFIG as GATE_CONFIG
 from test_gate import MOD
 from test_git import commit, git
+from test_restructure import IMPL, OLD, PLAN, PLAN_PATH
 
+from cce_code_health import gitio
 from cce_code_health.architecture import _sccs, analyse_texts
 from cce_code_health.cli import main
 
@@ -150,3 +152,66 @@ def test_gate_architecture_check(tmp_path, capsys):
     assert main(["gate", "--repo", str(tmp_path), "--log", log]) == 1
     out = capsys.readouterr().out
     assert "FAIL architecture" in out and "new architecture violation: no-tests: pkg.mod -> tests" in out
+
+
+@pytest.mark.parametrize("src, cond, guarded", [
+    ("from typing import TYPE_CHECKING\n", "TYPE_CHECKING", True),
+    ("from typing_extensions import TYPE_CHECKING as TC\n", "TC", True),
+    ("import typing\n", "typing.TYPE_CHECKING", True),
+    ("TYPE_CHECKING = True\n", "TYPE_CHECKING", False),
+    ("from typing import TYPE_CHECKING\nTYPE_CHECKING = True\n", "TYPE_CHECKING", False),
+    ("from other import TYPE_CHECKING\n", "TYPE_CHECKING", False),
+    ("import other as typing\n", "typing.TYPE_CHECKING", False),
+    ("import typing\ntyping.TYPE_CHECKING = True\n", "typing.TYPE_CHECKING", False)])
+def test_type_checking_guard_must_be_typing(src, cond, guarded):
+    texts = {"src/pkg/domain/m.py": src + f"if {cond}:\n    import pkg.app.ui\n", "src/pkg/app/ui.py": ""}
+    found = ("domain-pure", "pkg.domain.m", "pkg.app.ui") in keys(analyse_texts(texts, ARCH_TABLE))
+    assert found != guarded
+
+
+def test_unmatched_rule_entry_warns(repo, capsys):
+    res = analyse_texts({"src/pkg/app/ui.py": "", "src/pkg/domain/m.py": "import requests\n"}, ARCH_TABLE)
+    assert res.warnings == ["rule app-layers: entry pkg.services matches no module"]
+    assert main(["arch", "--repo", str(repo)]) == 0
+    assert "WARNING rule app-layers: entry pkg.services matches no module" in capsys.readouterr().out
+
+
+NO_TESTS = ('include = ["pkg/*"]\n[architecture]\nroots = ["."]\n'
+            '[[architecture.forbid]]\nname = "no-tests"\nfrom = ["pkg"]\nto = ["tests"]\n')
+
+
+def gate_repo(tmp_path, mod):
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".gitignore": "__pycache__/\n", PLAN_PATH: PLAN,
+                      ".codehealth/config.toml": GATE_CONFIG.replace('include = ["pkg/*"]', NO_TESTS),
+                      "pkg/__init__.py": "", "pkg/mod.py": mod, "frozen/ident.py": "X = 1\n",
+                      "tests/__init__.py": "", "tests/test_x.py": "def test(): pass\n"})
+    return tmp_path
+
+
+VIOLATING = MOD.replace('may change."""\n', 'may change."""\n    import tests\n')
+
+
+def test_gate_revert_restoring_violation_passes(tmp_path, capsys):
+    repo = gate_repo(tmp_path, VIOLATING)
+    commit(repo, {"pkg/mod.py": MOD}, "drop import")
+    s1 = gitio.rev(repo, "HEAD")
+    git(repo, "revert", "--no-edit", s1)
+    log = str(tmp_path.parent / "g.log")
+    assert main(["gate", "--repo", str(repo), "--log", log, "--base", s1, "--revert", s1]) == 0
+    out = capsys.readouterr().out
+    assert "ok   architecture" in out and "(allowed: exact revert)" in out
+    assert main(["gate", "--repo", str(repo), "--log", log, "--base", s1]) == 1
+
+
+def test_restructure_moves_grandfathered_violation(tmp_path, capsys):
+    repo = gate_repo(tmp_path, VIOLATING)
+    (repo / "pkg/calc_impl.py").write_text(IMPL.replace('may change."""\n', 'may change."""\n    import tests\n'))
+    (repo / "pkg/mod.py").write_text(OLD)
+    log = str(tmp_path.parent / "g.log")
+    assert main(["gate", "--repo", str(repo), "--log", log, "--mode", "restructure", "--plan", PLAN_PATH]) == 0
+    out = capsys.readouterr().out
+    assert "moved architecture violation: no-tests: pkg.mod -> tests now pkg.calc_impl -> tests" in out
+    (repo / "pkg/__init__.py").write_text("import tests\n")      # a fresh violation still fails
+    assert main(["gate", "--repo", str(repo), "--log", log, "--mode", "restructure", "--plan", PLAN_PATH]) == 1
+    assert "new architecture violation: no-tests: pkg -> tests" in capsys.readouterr().out

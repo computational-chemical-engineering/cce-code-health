@@ -309,6 +309,7 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         hit = restructure.plan_problems(plan, changes)
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
 
+    roots = (cfg.architecture or {}).get("roots", ["."])
     # Python-only rules: C++ static rules (public headers, literals) are not implemented yet.
     py = [(bp, hp) for _, bp, hp in changes
           if ((bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))) and (hp or bp).endswith(".py")]
@@ -324,8 +325,7 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
         checks.append(Check("literals", not gone and not new, detail[:400]))
     if g.get("public_api", False) and plan is not None:
-        problems = restructure.public_api_problems(plan, py, tb, th, _public_api,
-                                                     (cfg.architecture or {}).get("roots", ["."]))
+        problems = restructure.public_api_problems(plan, py, tb, th, _public_api, roots)
         checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
     elif g.get("public_api", False):
         problems = []
@@ -342,11 +342,18 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
                     problems.append(f"{where}: {name}{s} -> {ah[name]}")
             problems += [f"{where}: {n} added (make it private?)" for n in ah if n not in ab]
         checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
-    arch = architecture.compare_refs(repo, base, None, cfg)
+    moved_to = set()
+    if plan is not None:
+        mods = [architecture.module_name(p, roots) for p in restructure.added_paths(changes)
+                if _match(p, plan["new_files"])]
+        moved_to = {m[0] for m in mods if m}
+    arch = architecture.compare_refs(repo, base, None, cfg, moved_to)
     if arch is not None:
-        fail, gain = arch
-        checks.append(Check("architecture", not fail, "; ".join((fail + gain)[:5])
-                            + (f"; +{len(fail + gain) - 5} more" if len(fail + gain) > 5 else "")))
+        fail, gain, warn = arch
+        items = fail + gain
+        checks.append(Check("architecture", not fail, "; ".join(items[:5])
+                            + (f"; +{len(items) - 5} more" if len(items) > 5 else "")
+                            + "".join(f"; warning: {w}" for w in warn)))
     checks.append(numeric_literals(py, tb, th))
     return checks
 
@@ -884,7 +891,8 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     check `gain` fails unless debt over the touched files dropped. `info`, if given, receives
     debt_before and debt_after (rounded to 2 decimals). With `revert` (SHAs) a static check
     `revert` requires the worktree tree (`head_tree`) to equal base with those commits reverted,
-    and the debt check passes even when debt rises.
+    and the debt and architecture checks report but pass (an exact revert may restore debt or a
+    violation the reverted step removed).
     mode "restructure" (needs `plan`, a path under .codehealth/restructure/ read at base): as
     refactor, plus the `plan` check and the restructure public-API rule; `info["plan"]` receives
     {path, blob, id}.
@@ -915,10 +923,12 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         debt.ok = True
         debt.detail += " (rise allowed: exact revert)"
         extra = [revert_check(repo, base, revert, head_tree or gitio.worktree_tree(repo))]
-    checks = (config_checks(cfg, changes, cadence, mode) + static_checks(repo, base, cfg, changes,
-                                                                  trial=config_override is not None,
-                                                                  plan=plan_data)
-              + [debt] + extra)
+    static = static_checks(repo, base, cfg, changes, trial=config_override is not None, plan=plan_data)
+    for c in static:
+        if revert and c.name == "architecture" and not c.ok:
+            c.ok = True
+            c.detail += " (allowed: exact revert)"
+    checks = config_checks(cfg, changes, cadence, mode) + static + [debt] + extra
     if require_gain:
         gained = dh < db - 1e-9
         checks.append(Check("gain", gained, f"{db:.1f} -> {dh:.1f}" if gained

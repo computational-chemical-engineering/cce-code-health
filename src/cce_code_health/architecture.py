@@ -5,6 +5,7 @@ Configured in the optional `[architecture]` table of `.codehealth/config.toml` (
     [architecture]
     roots = ["src"]                 # import roots: src/pkg/mod.py -> pkg.mod, src/pkg/__init__.py -> pkg
     type_checking = false           # false: imports under `if TYPE_CHECKING:` are ignored
+                                    # (only a TYPE_CHECKING bound once, from typing/typing_extensions)
     cycle_depth = 2                 # cycles between packages truncated to this many dotted parts
     [[architecture.layers]]
     name = "app-layers"
@@ -15,7 +16,8 @@ Configured in the optional `[architecture]` table of `.codehealth/config.toml` (
     to = ["pkg.application", "requests"]
     reason = "domain code has no I/O"
 
-A module entry "a.b" matches a.b and a.b.*. Imports are read with ast from every in-scope .py
+A module entry "a.b" matches a.b and a.b.*; an entry that matches no scanned or imported module
+draws a warning (`codehealth arch`, the gate's architecture check), not a failure. Imports are read with ast from every in-scope .py
 file under a root, at any nesting level: `import x.y` gives x.y; `from x import y` gives x.y if
 that module is among the scanned files, else x; relative imports are resolved against the
 file's module. Layers: an importer in layer i (longest matching entry) may not import a module
@@ -27,7 +29,9 @@ file:line example per edge.
 
 Ratchet identities (line numbers ignored): a violation is (rule, importer, imported); a cycle
 edge is the truncated (a, b) inside a cycle. `codehealth diff` and the gate's static check
-`architecture` fail on identities present at head but not at base.
+`architecture` fail on identities present at head but not at base. In restructure mode a new
+violation whose importer is a module of a planned new file is excused by a disappeared violation
+with the same rule and imported module (code moved with its import); cycle edges stay strict.
 """
 from __future__ import annotations
 
@@ -99,20 +103,68 @@ def module_name(path: str, roots) -> tuple[str, bool] | None:
     return None
 
 
-def _is_type_checking(test) -> bool:
-    return ((isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
-            or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"))
+TYPING_MODULES = ("typing", "typing_extensions")
+
+
+def _bound_names(tree) -> dict[str, list]:
+    """Every binding of a name anywhere in tree: name -> [binding nodes]."""
+    out: dict[str, list] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                name = a.asname or (a.name.split(".")[0] if isinstance(node, ast.Import) else a.name)
+                out.setdefault(name, []).append(node)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            out.setdefault(node.id, []).append(node)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.setdefault(node.name, []).append(node)
+        elif isinstance(node, ast.arg):
+            out.setdefault(node.arg, []).append(node)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar, ast.ExceptHandler)) and node.name:
+            out.setdefault(node.name, []).append(node)
+    return out
+
+
+def _type_checking_guards(tree) -> tuple[set[str], set[str]]:
+    """(bare names, module names) under which `if NAME:` / `if MOD.TYPE_CHECKING:` is a genuine
+    typing.TYPE_CHECKING guard: the name is bound exactly once in the module, by
+    `from typing import TYPE_CHECKING` (or typing_extensions) or `import typing`, and
+    TYPE_CHECKING is never assigned as an attribute."""
+    bound = _bound_names(tree)
+    names, mods = set(), set()
+    for name, nodes in bound.items():
+        if len(nodes) != 1:
+            continue
+        node = nodes[0]
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module in TYPING_MODULES:
+            if any(a.name == "TYPE_CHECKING" and (a.asname or a.name) == name for a in node.names):
+                names.add(name)
+        elif isinstance(node, ast.Import):
+            if any(a.name in TYPING_MODULES and (a.asname or a.name) == name for a in node.names):
+                mods.add(name)
+    if any(isinstance(n, ast.Attribute) and n.attr == "TYPE_CHECKING" and not isinstance(n.ctx, ast.Load)
+           for n in ast.walk(tree)):
+        mods = set()
+    return names, mods
+
+
+def _is_type_checking(test, guards: tuple[set[str], set[str]]) -> bool:
+    names, mods = guards
+    return ((isinstance(test, ast.Name) and test.id in names)
+            or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+                and isinstance(test.value, ast.Name) and test.value.id in mods))
 
 
 def _import_nodes(tree, type_checking: bool):
     """Import and ImportFrom nodes anywhere in tree (iterative; no recursion limit)."""
+    guards = (set(), set()) if type_checking else _type_checking_guards(tree)
     stack, out = [tree], []
     while stack:
         node = stack.pop()
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             out.append(node)
             continue
-        if not type_checking and isinstance(node, ast.If) and _is_type_checking(node.test):
+        if not type_checking and isinstance(node, ast.If) and _is_type_checking(node.test, guards):
             stack.extend(node.orelse)
         else:
             stack.extend(ast.iter_child_nodes(node))
@@ -156,6 +208,7 @@ class Result:
     cycle_edges: dict = field(default_factory=dict)   # (a, b) -> Imp (first example)
     kinds: dict = field(default_factory=dict)         # rule -> "layers" | "forbid"
     reasons: dict = field(default_factory=dict)       # rule -> reason
+    warnings: list = field(default_factory=list)      # ["rule <name>: entry <x> matches no module"]
 
 
 def _matches(mod: str, entry: str) -> bool:
@@ -227,6 +280,11 @@ def analyse_texts(texts: dict[str, str], arch: dict) -> Result:
             continue
         for node in _import_nodes(tree, arch.get("type_checking", False)):
             res.imports += [Imp(mod, t, p, node.lineno) for t in _targets(node, mod, pkg, known)]
+    seen = known | {imp.imported for imp in res.imports}
+    for kind, keys in (("layers", ("order",)), ("forbid", ("from", "to"))):
+        for rule in arch.get(kind, []):
+            res.warnings += [f"rule {rule['name']}: entry {e} matches no module"
+                             for k in keys for e in rule[k] if not any(_matches(m, e) for m in seen)]
     for rule in arch.get("layers", []):
         res.kinds[rule["name"]] = "layers"
         for imp in res.imports:
@@ -284,25 +342,42 @@ def _where(imp: Imp) -> str:
     return f"{imp.path}:{imp.line}"
 
 
-def ratchet(before: Result, after: Result) -> tuple[list[str], list[str]]:
-    """(failures, improvements) going from before (base) to after (head)."""
+def ratchet(before: Result, after: Result, moved_to: set[str] = frozenset()) -> tuple[list[str], list[str]]:
+    """(failures, improvements) going from before (base) to after (head).
+
+    `moved_to` (restructure mode): modules of the plan's new files. A new violation (r, m, b)
+    with m in moved_to is excused by a violation (r, x, b) that disappeared in the same step,
+    one for one: code moved with its grandfathered import. Cycle edges stay strict."""
+    new = sorted(set(after.violations) - set(before.violations))
+    gone = sorted(set(before.violations) - set(after.violations))
+    moved = []
+    for r, m, b in list(new):
+        if m not in moved_to:
+            continue
+        x = next((g for g in gone if g[0] == r and g[2] == b), None)
+        if x is not None:
+            gone.remove(x)
+            new.remove((r, m, b))
+            moved.append(f"moved architecture violation: {r}: {x[1]} -> {b} now {m} -> {b}")
     fail = [f"new architecture violation: {r}: {a} -> {b} ({_where(after.violations[(r, a, b)])})"
-            for r, a, b in sorted(set(after.violations) - set(before.violations))]
+            for r, a, b in new]
     fail += [f"new import cycle edge: {a} -> {b} ({_where(after.cycle_edges[(a, b)])})"
              for a, b in sorted(set(after.cycle_edges) - set(before.cycle_edges))]
-    gain = [f"removed architecture violation: {r}: {a} -> {b}"
-            for r, a, b in sorted(set(before.violations) - set(after.violations))]
+    gain = [f"removed architecture violation: {r}: {a} -> {b}" for r, a, b in gone]
     gain += [f"removed import cycle edge: {a} -> {b}"
              for a, b in sorted(set(before.cycle_edges) - set(after.cycle_edges))]
-    return fail, gain
+    return fail, gain + moved
 
 
-def compare_refs(repo: Path, base: str, head: str | None, cfg: config.Config) -> tuple[list[str], list[str]] | None:
-    """Ratchet base against head (None: worktree) with the base config; None when off."""
+def compare_refs(repo: Path, base: str, head: str | None, cfg: config.Config,
+                 moved_to: set[str] = frozenset()) -> tuple[list[str], list[str], list[str]] | None:
+    """Ratchet base against head (None: worktree) with the base config: (failures, improvements,
+    warnings about head); None when off."""
     before = analyse(repo, base, cfg)
     if before is None:
         return None
-    return ratchet(before, analyse(repo, head, cfg))
+    after = analyse(repo, head, cfg)
+    return (*ratchet(before, after, moved_to), after.warnings)
 
 
 def to_json(res: Result) -> dict:
@@ -310,7 +385,7 @@ def to_json(res: Result) -> dict:
             "violations": [{"rule": r, "kind": res.kinds.get(r), "importer": a, "imported": b,
                             "path": imp.path, "line": imp.line}
                            for (r, a, b), imp in sorted(res.violations.items())],
-            "cycles": res.cycles}
+            "cycles": res.cycles, "warnings": res.warnings}
 
 
 def report_lines(res: Result) -> list[str]:

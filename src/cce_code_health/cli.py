@@ -134,6 +134,7 @@ def cmd_diff(a) -> int:
     if arch:
         failures += arch[0]
         rows += [f"  {g}" for g in arch[1]]
+        rows += [f"  WARNING {w}" for w in arch[2]]
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
                         "debt_base": round(db, 3), "debt_head": round(dh, 3),
                         "failures": failures, "base": rb, "head": rh,
@@ -157,6 +158,8 @@ def cmd_arch(a) -> int:
         raise ValueError(f"{cfg.source}: no [architecture] table")
     write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), **architecture.to_json(res)})
     print("\n".join(architecture.report_lines(res)))
+    for w in res.warnings:
+        print(f"  WARNING {w}")
     print(f"ARCH {repo.name}@{(ref or 'worktree')[:10]}: {res.files} files, {len(res.imports)} imports, "
           f"{len(res.violations)} violation(s), {len(res.cycles)} cycle(s)")
     return 0
