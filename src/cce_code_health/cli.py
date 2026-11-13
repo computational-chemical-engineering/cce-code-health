@@ -407,6 +407,31 @@ def _logged_commit(repo: Path, head: str | None, m: dict) -> str:
     return sha
 
 
+def target_debt(target: str, fd: dict | None, renames: dict[str, str] | None = None) -> dict | None:
+    """The function target's own debt before and after, and the new functions with debt in its
+    file (an extracted helper that is itself a hotspot), from the gate's `function_debt`.
+    None when the gate JSON has no function data or the target names no function. A target
+    `path::name` matches `path::name` exactly, else a function whose name ends in `::name` or
+    `.name` (C++ namespaces, Python classes)."""
+    if not fd or "::" not in target:
+        return None
+    path, name = target.split("::", 1)
+    before, after = fd.get("before", {}), fd.get("after", {})
+
+    def pick(table):
+        if f"{path}::{name}" in table:
+            return [f"{path}::{name}"]
+        return [q for q in table if q.startswith(f"{path}::") and
+                (q.endswith(f"::{name}") or q.endswith(f".{name}"))]
+    kb, ka = pick(before), pick(after)
+    if len(kb) > 1 or len(ka) > 1:
+        return {"ambiguous": sorted(set(kb + ka))}
+    new = {q[len(path) + 2:]: d for q, d in after.items()
+           if q.startswith(f"{path}::") and q not in before and q not in ka}
+    return {"before": before[kb[0]] if kb else 0.0, "after": after[ka[0]] if ka else 0.0,
+            "new_in_file": dict(sorted(new.items(), key=lambda x: -x[1]))}
+
+
 def cmd_log(a) -> int:
     repo = Path(a.repo).resolve()
     gj = Path(a.gate_json).resolve()
@@ -434,6 +459,7 @@ def cmd_log(a) -> int:
            "debt_before": m["debt_before"], "debt_after": m["debt_after"], "base_sha": m["base"],
            "ref_base_sha": m["ref_base"], "head_sha": head_sha, "head_tree": m["head_tree"],
            "tool_version": m.get("version"), "logged_with": __version__, "model": a.model,
+           "target_debt": target_debt(a.target, m.get("function_debt")),
            "hypothesis": a.hypothesis, "reverts": reverts, "checks": {c["name"]: c["ok"] for c in checks},
            "details": {c["name"]: c.get("detail", "") for c in checks},
            "gate_json": str(gj),
@@ -441,8 +467,13 @@ def cmd_log(a) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
+    td = rec["target_debt"] or {}
+    fn = (f", function {td['before']} -> {td['after']}" if "before" in td else
+          f", function ambiguous: {', '.join(td['ambiguous'])}" if "ambiguous" in td else "")
+    born = ", ".join(f"{k} {v}" for k, v in list(td.get("new_in_file", {}).items())[:3])
     print(f"LOG {a.campaign} step {rec['step']} {result} {a.target} "
-          f"debt {m['debt_before']} -> {m['debt_after']} ({out})")
+          f"debt {m['debt_before']} -> {m['debt_after']}{fn}"
+          + (f", new in file: {born}" if born else "") + f" ({out})")
     return 0
 
 

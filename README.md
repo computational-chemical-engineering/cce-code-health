@@ -99,7 +99,8 @@ parameters above 5, weight 1. A brain function has CCN > 25 and NLOC > 70. Bindi
 length carries no debt and does not make them brain functions; their CCN still counts. File smells as for
 Python: large above 1000 NLOC, huge above 2000, duplication above 10 % (8-line windows,
 comments ignored). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
-towards the enclosing function. Nesting is computed by codehealth, not lizard: if, for, while,
+towards the enclosing function. Captures are not counted: a lambda that captures the caller's
+locals by reference (`[&]`) is as coupled as a long parameter list, but scores none of it. Nesting is computed by codehealth, not lizard: if, for, while,
 do, switch and try open a level, braced or not; `else if`, else and catch do not. Suppressions
 use `// codehealth: allow ccn,nesting -- reason` on the line above the declaration (above its
 `template` line, if any) or on the lines up to its opening brace, and `allow-file`.
@@ -182,7 +183,11 @@ example names and docstrings from review notes): the gate JSON must come from a 
 `--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
 and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
 For results other than accepted, `head_sha` is `meta.head` when it is a sha (a committed step that
-failed keeps its evidence), else null.
+failed keeps its evidence), else null. Debt in the gate is per touched file; for a function
+target (`path::name`) the record also carries `target_debt`: the function's own debt before and
+after (0 when absent; a name matches exactly or as the last `::`/`.` component) and
+`new_in_file`, the new functions with debt in that file (an extracted helper that is a hotspot
+itself). The gate JSON's meta `function_debt` holds the per-function numbers it comes from.
 
 ```bash
 codehealth gate --base <last-accepted> --revert <sha> [--revert <sha> ...]

@@ -118,3 +118,16 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
 - Lessons for any C++ adopter: (1) a dependency-resolution guard (`same_lines`) needs the build
   to log every resolution branch symmetrically (dem 246837a); (2) CMake `message(STATUS)` lines
   carry a `-- ` prefix; (3) a guard matching nothing must fail (now enforced).
+- Smoke gate PASS 12/12 (1789 s). CB 3fd9b93 (with dem's playbook); baseline debt 1871.8,
+  13,038 NLOC, 12 brain functions.
+- S1 closed: 3 extract-phase steps on demSolveContacts (5c2bb0a colorVelocityPhase, a842970
+  colorPositionPhase, 913d709 solvePositionPhase), all GATE PASS 13/13 bitwise, logged
+  accepted. File debt 344.8 -> 331.2; function 345 -> 258.3 (CCN 261 -> 196, NLOC 912 -> 693);
+  dem 1871.8 -> 1858.2. HEAD state_hash vs the pre-rename main reference ALL IDENTICAL. Tier
+  times per step: build_host 210-282 s, ctest_host 385-505 s, state_hash 20-338 s, build_cuda
+  435-615 s.
+- S1 tool feedback, done: (1) log records the function target's own debt (`target_debt`);
+  (2) step 3 gained 0.9 because the 19-parameter helper is a hotspot itself: seed anti-pattern,
+  parameter-object first; (3) cpp@0 does not see `[&]` captures (voteInvariant/withConsensus
+  still couple the moved code to caller locals): documented, review checks it. Candidate for
+  cpp@1: count by-reference captured names as parameters of the lambda.

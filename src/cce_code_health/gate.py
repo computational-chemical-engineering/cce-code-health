@@ -1158,13 +1158,28 @@ def _dispatch(t, kind: str, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
     raise ValueError(f"tier {t['name']}: unknown kind {kind!r}")
 
 
-def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> tuple[Check, float, float]:
+def function_debts(reports: dict[str, dict]) -> dict[str, float]:
+    """{path::name: debt} for the functions with debt (several definitions of one name add up)."""
+    out: dict[str, float] = {}
+    for r in reports.values():
+        for f in r["functions"]:
+            if f["debt"] > 0:
+                out[f["qualname"]] = round(out.get(f["qualname"], 0.0) + f["debt"], 2)
+    return out
+
+
+def debt_check(repo: Path, base: str, cfg: config.Config, changes,
+               fns: dict | None = None) -> tuple[Check, float, float]:
     """Debt over the touched in-scope files must not rise, and no touched file may newly fail
-    analysis (it would score 0 debt), in every mode: (check, before, after)."""
+    analysis (it would score 0 debt), in every mode: (check, before, after). `fns`, if given,
+    receives {"before": {path::name: debt}, "after": {...}} over the touched files (functions
+    with debt only), so that `codehealth log` can report a function target's own delta."""
     from .cli import analyze_ref, new_errors  # noqa: PLC0415 (cli imports this module)
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
     rb, rh = analyze_ref(repo, base, cfg, bp), analyze_ref(repo, None, cfg, hp)
+    if fns is not None:
+        fns.update(before=function_debts(rb), after=function_debts(rh))
     db = sum(r["debt"] for r in rb.values())
     dh = sum(r["debt"] for r in rh.values())
     errors = new_errors(rb, rh, changes)
@@ -1267,9 +1282,10 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
             info["plan"] = {"path": plan_data["path"], "blob": plan_data["blob"], "id": plan_data["id"]}
     mode = "refactor" if mode == "restructure" else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
-    debt, db, dh = debt_check(repo, base, cfg, changes)
+    fns: dict = {}
+    debt, db, dh = debt_check(repo, base, cfg, changes, fns)
     if info is not None:
-        info.update(debt_before=round(db, 2), debt_after=round(dh, 2))
+        info.update(debt_before=round(db, 2), debt_after=round(dh, 2), function_debt=fns)
     extra = []
     if revert:
         debt.ok = True
