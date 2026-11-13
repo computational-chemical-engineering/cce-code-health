@@ -58,22 +58,24 @@ campaign is one of its work packages and follows those rules.
    same evaluation order of side effects and floating-point operations, same exceptions,
    same logging and messages, same public names and signatures, same string literals.
    New helpers are private (`_name`) and live in the same module.
-5. **Gate.** `codehealth gate --mode refactor --base <last accepted commit>
+5. **Commit provisionally**, then gate the commit: `refactor(<area>): <what>` with trailers
+   `Codehealth-Class: refactor` and `Codehealth-Recipe: <id>` (the run log keeps the debt
+   numbers). Gating a commit rather than a dirty tree works for every repo, including
+   those whose tests need a clean tree, and the gate JSON then names the commit (`head`).
+6. **Gate.** `codehealth gate --mode refactor --base <last accepted commit>
    --ref-base <campaign base> --require-gain --json <gate.json>`.
    It checks scope, frozen and forbidden paths, literals, public API, debt (must go down
    with `--require-gain`), then the repo's tiers (tests, identity, references bitwise,
    benchmark no slowdown). Exit 0 means accept; the summary line shows `debt=a->b`.
-6. **Accept** on exit 0: commit `refactor(<area>): <what>` with trailers
-   `Codehealth-Class: refactor`, `Codehealth-Recipe: <id>`, `Codehealth-Debt: <a> -> <b>`.
-   Otherwise **revert** (`git checkout -- <files>`).
-7. **Log** every attempt with `codehealth log --gate-json <gate.json> --campaign <id>
-   --target <path::qualname> --recipe <id> [--model <name>]`, after the commit (accepted:
-   it checks that HEAD's tree is the tree the gate judged) or after the revert. It infers
-   `accepted`, `gate-fail` (with the tier) or `no-gain`; pass `--result review-reject
-   --reason <why>` for review rejections. **Never write log lines by hand.** The log lives
-   outside the working tree during the campaign (the gate rejects any change under
-   `.codehealth/` in a step): `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`.
-   At campaign end copy it to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
+   Otherwise drop the step: `git reset --hard <last accepted commit>`.
+7. **Log** every attempt, right after the gate (before any reset): `codehealth log
+   --gate-json <gate.json> --campaign <id> --target <path::qualname> --recipe <id>
+   [--model <name>]`. It infers `accepted`, `gate-fail` (with the tier) or `no-gain`, and
+   for an accepted step checks that HEAD's tree is the tree the gate judged.
+   **Never write log lines by hand.** The log lives outside the working tree during the
+   campaign (the gate rejects any change under `.codehealth/` in a step):
+   `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it
+   to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
 
 ## Review against gaming (every ~5 accepted steps)
 
@@ -81,7 +83,17 @@ A fresh-context reviewer (the repo's review lane, or an agent that sees only the
 answers per step: is the code easier to read and change? Reject and revert steps that
 lower debt by fragmenting logic into meaningless pieces, by moving complexity into a
 helper with the same complexity, by bundling unrelated parameters, or by hiding branches
-in data structures nobody can read. Record `review-reject` with the reason.
+in data structures nobody can read, and the anti-patterns listed in the seed playbook.
+
+A rejected step is undone by an exact revert, gated like a step but allowed to raise debt:
+`git revert --no-edit <sha>...` (one commit for all rejected steps of the review, or one
+per step), then `codehealth gate --mode refactor --base <sha before the revert>
+--ref-base <campaign base> --revert <sha> [--revert <sha> ...] --json <gate.json>`. The
+gate checks that the commit is exactly the inverse of those steps and runs the behaviour
+tiers. Log it with `codehealth log --gate-json <gate.json> --campaign <id> --target ..
+--recipe <recipe of the rejected step> --reason <why>`: it records `review-reject`. If the
+revert does not apply cleanly (later steps built on it), rework the code as a normal step
+instead.
 
 ## Playbook consolidation (every ~10 attempts)
 

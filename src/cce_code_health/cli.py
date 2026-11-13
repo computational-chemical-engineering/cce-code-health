@@ -148,9 +148,10 @@ def cmd_self_test(a, repo: Path, log: Path) -> int:
     base = gitio.rev(repo, "HEAD")
     cfg = (config.parse(Path(a.config).read_text(), f"override:{a.config}") if a.config
            else config.load(repo, base))
-    ok, checks, what = gatemod.self_test(repo, cfg, log, a.mutate)
+    ref_base = gitio.merge_base(repo, a.ref_base, "HEAD") if a.ref_base else None
+    ok, checks, what = gatemod.self_test(repo, cfg, log, a.mutate, ref_base)
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "self_test": True,
-                                 "mutation": what, "log": str(log)},
+                                 "mutation": what, "ref_base": ref_base, "log": str(log)},
                         "checks": [c.__dict__ for c in checks]})
     print(f"  mutation: {what}")
     for c in checks:
@@ -166,18 +167,34 @@ def cmd_self_test(a, repo: Path, log: Path) -> int:
     return 0 if ok else 1
 
 
+def _resolves(repo: Path, ref: str) -> bool:
+    try:
+        gitio.rev(repo, ref)
+        return True
+    except gitio.GitError:
+        return False
+
+
 def cmd_gate(a) -> int:
     repo = Path(a.repo).resolve()
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
     if a.self_test:
         return cmd_self_test(a, repo, log)
+    revert = a.revert or []
+    if revert and a.require_gain:
+        raise ValueError("--revert and --require-gain are incompatible: a revert raises debt")
     head_tree = gitio.worktree_tree(repo)
+    head = (gitio.rev(repo, "HEAD")
+            if head_tree == gitio.git(repo, "rev-parse", "HEAD^{tree}").decode().strip() else "worktree")
     info: dict = {}
     checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
                                           Path(a.config).resolve() if a.config else None, a.mode,
-                                          a.ref_base, require_gain=a.require_gain, info=info)
+                                          a.ref_base, require_gain=a.require_gain, info=info,
+                                          revert=revert, head_tree=head_tree)
+    if revert:
+        revert = [gitio.rev(repo, s) for s in revert if _resolves(repo, s)]
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
-                                 "ref_base": ref_base, "head": "worktree", "cadence": a.cadence, "mode": a.mode,
+                                 "ref_base": ref_base, "head": head, "revert": revert, "cadence": a.cadence, "mode": a.mode,
                                  "log": str(log), **info, "require_gain": a.require_gain,
                                  "trial": bool(a.config), "head_tree": head_tree},
                         "checks": [c.__dict__ for c in checks]})
@@ -186,8 +203,10 @@ def cmd_gate(a) -> int:
     failed = [c.name for c in checks if not c.ok]
     verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
     print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
-          f"head=worktree mode={a.mode} cadence={a.cadence} "
-          f"debt={info['debt_before']}->{info['debt_after']}: {len(checks) - len(failed)}/{len(checks)} checks passed"
+          f"head={head[:10]} mode={a.mode} cadence={a.cadence} "
+          f"debt={info['debt_before']}->{info['debt_after']}"
+          + (f" revert={len(revert)}" if revert else "")
+          + f": {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
           + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
     return 1 if failed else 3 if a.config else 0
@@ -214,14 +233,25 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
             raise ValueError(f"--gate-json meta lacks {k!r} (written by an older codehealth?)")
     if not re.fullmatch(r"[A-Za-z0-9._-]+", a.campaign):
         raise ValueError(f"--campaign must match [A-Za-z0-9._-]+, got {a.campaign!r}")
-    if a.result == "review-reject" and not a.reason:
-        raise ValueError("--result review-reject needs --reason")
-    if a.reason and a.result != "review-reject":
-        raise ValueError("--reason is only for --result review-reject")
+    reverting = bool(meta_.get("revert"))
+    if reverting:
+        if a.result not in (None, "gate-fail", "review-reject"):
+            raise ValueError(f"--result {a.result} is not allowed for a revert gate JSON "
+                             "(gate-fail or review-reject)")
+        if not a.reason:
+            raise ValueError("a revert gate JSON needs --reason")
+    else:
+        if a.result == "review-reject" and not a.reason:
+            raise ValueError("--result review-reject needs --reason")
+        if a.reason and a.result != "review-reject":
+            raise ValueError("--reason is only for --result review-reject")
     checks = data["checks"]
     failed = [c for c in checks if not c["ok"]]
     gained = meta_["mode"] == "optimize" or meta_["debt_after"] < meta_["debt_before"] - EPS
-    result = a.result or _infer_result(checks, meta_["mode"], meta_["debt_before"], meta_["debt_after"])
+    if reverting:
+        result = a.result or ("gate-fail" if failed else "review-reject")
+    else:
+        result = a.result or _infer_result(checks, meta_["mode"], meta_["debt_before"], meta_["debt_after"])
     if result == "gate-fail" and not failed:
         raise ValueError("--result gate-fail but every check in the gate JSON passed")
     if result != "gate-fail" and failed:
@@ -236,13 +266,14 @@ def cmd_log(a) -> int:
     gj = Path(a.gate_json).resolve()
     data = json.loads(gj.read_text())
     checks, m, result = _check_log_args(a, data)
-    head_sha = None
-    if result == "accepted":
+    reverts = list(m.get("revert") or [])
+    head_sha = m.get("head") if re.fullmatch(r"[0-9a-f]{40}", str(m.get("head"))) else None
+    if result == "accepted" or (reverts and result == "review-reject"):
         head_tree = gitio.git(repo, "rev-parse", "HEAD^{tree}").decode().strip()
         if head_tree != m["head_tree"]:
             raise ValueError("HEAD's tree differs from the tree the gate judged: commit the gated change "
                              f"first (HEAD {head_tree[:10]}, gate {m['head_tree'][:10]})")
-        if head_tree == gitio.git(repo, "rev-parse", f"{m['base']}^{{tree}}").decode().strip():
+        if result == "accepted" and head_tree == gitio.git(repo, "rev-parse", f"{m['base']}^{{tree}}").decode().strip():
             raise ValueError("HEAD's tree equals the base's tree: nothing was committed")
         head_sha = gitio.rev(repo, "HEAD")
     out = (Path(a.out) if a.out else gatemod._common_dir(repo) / "runs" / f"{a.campaign}.jsonl").resolve()
@@ -253,12 +284,12 @@ def cmd_log(a) -> int:
             raise ValueError(f"duplicate: campaign {a.campaign} already has step {old.get('step')} "
                              f"for this tree and base")
     failed = next((c["name"] for c in checks if not c["ok"]), None)
-    rec = {"campaign": a.campaign, "step": len(lines) + 1, "class": m["mode"], "target": a.target,
+    rec = {"campaign": a.campaign, "step": len(lines) + 1, "class": "revert" if reverts else m["mode"], "target": a.target,
            "recipe": a.recipe, "result": result, "failed_tier": failed, "reason": a.reason,
            "debt_before": m["debt_before"], "debt_after": m["debt_after"], "base_sha": m["base"],
            "ref_base_sha": m["ref_base"], "head_sha": head_sha, "head_tree": m["head_tree"],
            "tool_version": m.get("version"), "logged_with": __version__, "model": a.model,
-           "hypothesis": a.hypothesis, "checks": {c["name"]: c["ok"] for c in checks},
+           "hypothesis": a.hypothesis, "reverts": reverts, "checks": {c["name"]: c["ok"] for c in checks},
            "details": {c["name"]: c.get("detail", "") for c in checks},
            "gate_json": str(gj),
            "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
@@ -316,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--target", required=True, help="path::qualname")
     pl.add_argument("--recipe", required=True)
     pl.add_argument("--result", choices=RESULTS, help="default: inferred from the gate JSON")
-    pl.add_argument("--reason", help="required iff --result review-reject")
+    pl.add_argument("--reason", help="required for --result review-reject and for revert gate JSONs")
     pl.add_argument("--model")
     pl.add_argument("--hypothesis")
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")
@@ -339,6 +370,9 @@ def main(argv: list[str] | None = None) -> int:
                                      help="mutate one literal in a temporary HEAD worktree; every reference tier must detect it")
     sub.choices["gate"].add_argument("--mutate", help="with --self-test: mutate the literal at path:line "
                                      "or path:line:N (N-th numeric literal on the line, 1-based)")
+    sub.choices["gate"].add_argument("--revert", action="append", metavar="SHA",
+                                     help="gate a commit that exactly undoes this earlier accepted step "
+                                     "(repeatable); debt may rise; incompatible with --require-gain")
     sub.choices["gate"].add_argument("--require-gain", action="store_true",
                                      help="add a static check `gain`: debt over touched files must drop")
     a = ap.parse_args(argv)

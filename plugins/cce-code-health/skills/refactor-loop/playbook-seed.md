@@ -14,4 +14,19 @@ side effects and floating-point operations, same exceptions and messages.
 | parameter-object | many parameters | the same group of 4+ parameters travels together through several private functions and forms one concept | public signatures (public_api rule); unrelated parameters | private dataclass for the group, used only between private functions |
 | split-flag-argument | boolean flag parameter selecting behaviour | private function with a `mode`/`flag` switching two paths | public function | two private functions; callers call the right one |
 | consolidate-duplicate | duplication | identical blocks in 2+ places in scope | blocks differ in literals or order | one private helper; both call sites call it |
+| check-ladder | long function, many conditionals, left over after extract-phase | a run of 4+ rungs with the same shape (`if <check>: return <result>` or `raise`), evaluated in order | rungs differ in shape, bind locals that later rungs read, or mutate state | an ordered tuple of `(predicate, result)` pairs (private functions or small lambdas) and one loop returning the first match; same order, same short-circuit, same fall-through; do it in one step, never by peeling the tail rung by rung |
 | replace-temp-with-query | long function | temporaries computed once and read far below | computation is expensive or has side effects | small private function computing the value where needed, only if pure and cheap |
+
+## Anti-patterns (review rejects; they lower the score without helping)
+
+- **Lifting one branch out of a structural recursion** so the extracted helper and the
+  original call each other: mutual recursion for a score drop. Keep a recursive walk in
+  one function, or extract the whole per-node step.
+- **Grab-bag helper**: its parameters feed disjoint statements, or its name covers only
+  part of its body. Split by purpose or leave the code in place.
+- **Peeling a ladder rung by rung**: each step moves the last `if ...: return` into a
+  helper. Use `check-ladder` once instead.
+- **Same complexity, new address**: a helper that carries all the branching of the
+  original while the caller becomes one line.
+
+Evidence: OpenFlowsheet S17 review 1 (2026-11-13), 12 steps, 2 review-rejects.

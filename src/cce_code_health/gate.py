@@ -39,8 +39,10 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     max_slowdown = 0.03               # every other benchmark tier: may not slow down beyond this
 
 Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted).
-{ref_base} is the campaign base sha (`--ref-base`; equal to {base} when not given; both are HEAD in
-the self-test).
+{ref_base} is the campaign base sha (`--ref-base`; equal to {base} when not given). In the
+self-test `--ref-base` (merge-base with HEAD) is honoured for the {ref_base} placeholder only, so an
+impacted-test selector sees the campaign base; reference comparison stays against the unmutated HEAD.
+Without it {base} and {ref_base} are both HEAD there.
 Every touched path (base or head side) must be in scope. Patterns are fnmatch with '*' matching
 '/', and "/**/" also matching a single "/" (one matcher for scope, frozen and forbid).
 
@@ -48,6 +50,17 @@ Two bases (`--base` and `--ref-base`): static checks, debt and numeric-literals 
 (the last accepted step); reference and benchmark tiers compare head with `--ref-base` (the
 campaign base; default: the same as `--base`), so tolerances and slowdowns cannot compound over
 steps. Both are reduced to their merge-base with HEAD; the GATE line prints `ref-base=<sha10>`.
+
+Gate JSON `meta.head` is the HEAD commit sha when the worktree is clean relative to HEAD (a
+committed step), else "worktree"; the GATE line prints `head=<sha10>` or `head=worktree`.
+
+`--revert SHA` (repeatable) gates a commit that exactly undoes earlier accepted steps (review
+rejected them). Static check `revert`: every SHA is a single-parent commit and an ancestor of the
+resolved base, and the worktree tree must equal base with those commits reverted (newest first,
+computed with `git merge-tree --write-tree`, needs git >= 2.38, worktree and index untouched); a
+conflict or a difference fails the check (up to 10 differing paths listed). In revert mode the debt
+check passes even when debt rises ("rise allowed: exact revert"); `--require-gain` is a usage
+error; all other checks and tiers run as usual. Meta `revert` lists the full shas ([] otherwise).
 
 Reference tiers: the ref-base outputs come from a worktree under
 `<git-common-dir>/codehealth/base-<sha>`, run twice (determinism check at base), and are cached
@@ -434,6 +447,7 @@ class Ctx:
     mode: str
     cfg: config.Config
     changes: list
+    ref_arg: str = ""   # value filled into {ref_base}; differs from ref_base only in the self-test
 
 
 def _cache_dir(repo: Path, sha: str, name: str) -> Path:
@@ -445,7 +459,7 @@ def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
     Cached under <git-common-dir>/codehealth/cache/<sha>/<tier>/ with a manifest holding the
     command, outputs and env, and the result of the determinism check (two runs, at caching time)."""
     names, timeout = list(t["outputs"]), t.get("timeout")
-    cmd = _fill(t["cmd"], repo="<repo>", base=ctx.ref_base, ref_base=ctx.ref_base, files=ctx.files, out="<out>")
+    cmd = _fill(t["cmd"], repo="<repo>", base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out="<out>")
     key = {"cmd": cmd, "outputs": names, "env": ctx.env}
     cdir = _cache_dir(ctx.repo, ctx.ref_base, t["name"])
     try:
@@ -462,7 +476,7 @@ def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
     for _ in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
         try:
-            rc, _ = _run(_fill(t["cmd"], repo=str(tree), base=ctx.ref_base, ref_base=ctx.ref_base,
+            rc, _ = _run(_fill(t["cmd"], repo=str(tree), base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base,
                                 files=ctx.files, out=str(out)),
                          tree, ctx.env, ctx.log, timeout)
             if rc != 0:
@@ -575,7 +589,7 @@ def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
     runs, executed = [], None
     for i in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
-        cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.ref_base, ref_base=ctx.ref_base,
+        cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base,
                     files=ctx.files, out=str(out))
         try:
             if i == 0 and t.get("coverage", False):
@@ -721,13 +735,13 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
 def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, log,
               mode: str = "refactor", keep_going: bool | None = None,
               kinds: tuple | None = None, ref_base: str | None = None,
-              only: set | None = None) -> list[Check]:
+              only: set | None = None, ref_arg: str | None = None) -> list[Check]:
     g = cfg.gate
     gitdir = _gitdir(repo)
     env = {k: str(v).replace("{gitdir}", str(gitdir)) for k, v in g.get("env", {}).items()}
     files = " ".join(shlex.quote(hp) for _, _, hp in changes if hp)
     keep_going = g.get("keep_going", False) if keep_going is None else keep_going
-    ctx = Ctx(repo, base, ref_base or base, files, env, log, mode, cfg, changes)
+    ctx = Ctx(repo, base, ref_base or base, files, env, log, mode, cfg, changes, ref_arg or "")
     get_tree = lambda: base_tree(repo, ctx.ref_base, keep=(base,))  # noqa: E731
     checks = []
     for t in _selected(cfg, cadence, mode, gitdir):
@@ -735,7 +749,7 @@ def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, 
         if (kinds and kind not in kinds) or (only is not None and name not in only):
             continue
         if kind == "command":
-            rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, ref_base=ctx.ref_base,
+            rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, ref_base=ctx.ref_arg or ctx.ref_base,
                                files=files, out=""),
                          repo, env, log, t.get("timeout"))
             ok, detail, exit_code = rc == 0, (f"exit {rc}" if rc else ""), rc
@@ -763,10 +777,67 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> tuple[Chec
     return Check("debt", dh <= db + 1e-9, f"{db:.1f} -> {dh:.1f}"), db, dh
 
 
+def _git_rc(repo: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                          env={**os.environ, **(env or {})})
+
+
+def expected_revert_tree(repo: Path, base: str, shas: list[str]) -> tuple[str | None, str]:
+    """Tree of `base` with the commits `shas` reverted, newest first, computed with
+    `git merge-tree --write-tree` on dangling commits (worktree and index untouched).
+    Returns (tree, "") or (None, reason) when a SHA is unusable or a revert conflicts."""
+    ver = _git_rc(repo, "version").stdout.split()[2:3]
+    nums = [int(x) for x in re.findall(r"\d+", ver[0])[:2]] if ver else []
+    if nums < [2, 38]:
+        raise RuntimeError("--revert needs git >= 2.38 (merge-tree --write-tree), found "
+                           + (ver[0] if ver else "unknown"))
+    full = []
+    for s in shas:
+        try:
+            full.append(gitio.rev(repo, s))
+        except gitio.GitError:
+            return None, f"{s} does not resolve to a commit"
+    for s in full:
+        parents = _git_rc(repo, "rev-list", "--parents", "-n", "1", s).stdout.split()[1:]
+        if len(parents) != 1:
+            return None, f"{s[:10]} is not a single-parent commit"
+        if _git_rc(repo, "merge-base", "--is-ancestor", s, base).returncode != 0:
+            return None, f"{s[:10]} is not an ancestor of the base {base[:10]}"
+    order = [c for c in _git_rc(repo, "rev-list", "--topo-order", base).stdout.split() if c in set(full)]
+    ident = {k: v for n in ("AUTHOR", "COMMITTER") for k, v in
+             ((f"GIT_{n}_NAME", "codehealth"), (f"GIT_{n}_EMAIL", "codehealth@localhost"))}
+    cur, tree = base, None
+    for r in order:
+        m = _git_rc(repo, "merge-tree", "--write-tree", f"--merge-base={r}", cur, f"{r}^")
+        if m.returncode == 1:
+            return None, f"revert of {r[:10]} does not apply cleanly at base; rework it as a normal step"
+        if m.returncode != 0:
+            raise RuntimeError(f"git merge-tree: {m.stderr.strip()}")
+        tree = m.stdout.split()[0]
+        c = _git_rc(repo, "commit-tree", tree, "-p", cur, "-m", "codehealth revert check", env=ident)
+        if c.returncode != 0:
+            raise RuntimeError(f"git commit-tree: {c.stderr.strip()}")
+        cur = c.stdout.strip()
+    return tree, ""
+
+
+def revert_check(repo: Path, base: str, shas: list[str], head_tree: str) -> Check:
+    """The worktree must be exactly `base` with `shas` reverted."""
+    tree, why = expected_revert_tree(repo, base, shas)
+    if tree is None:
+        return Check("revert", False, why)
+    if tree == head_tree:
+        return Check("revert", True, f"{len(shas)} commit(s) reverted exactly")
+    paths = _git_rc(repo, "diff-tree", "-r", "--name-only", tree, head_tree).stdout.split()
+    more = f" (+{len(paths) - 10} more)" if len(paths) > 10 else ""
+    return Check("revert", False, "worktree differs from the exact revert: " + ", ".join(paths[:10]) + more)
+
+
 def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
          config_override: Path | None = None, mode: str = "refactor",
          ref_base: str | None = None, require_gain: bool = False,
-         info: dict | None = None) -> tuple[list[Check], str, str]:
+         info: dict | None = None, revert: list[str] | None = None,
+         head_tree: str | None = None) -> tuple[list[Check], str, str]:
     """config_override is for local trials only; CI must use the base's committed config.
 
     mode "refactor": references bitwise, benchmark may not slow down beyond max_slowdown.
@@ -775,7 +846,9 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     Static checks and debt use `base` (last accepted step); reference and benchmark tiers compare
     head with `ref_base` (campaign base; default: the same as base). With `require_gain` a static
     check `gain` fails unless debt over the touched files dropped. `info`, if given, receives
-    debt_before and debt_after (rounded to 2 decimals).
+    debt_before and debt_after (rounded to 2 decimals). With `revert` (SHAs) a static check
+    `revert` requires the worktree tree (`head_tree`) to equal base with those commits reverted,
+    and the debt check passes even when debt rises.
     """
     if mode not in ("refactor", "optimize"):
         raise ValueError(f"unknown mode {mode!r}")
@@ -787,9 +860,14 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     debt, db, dh = debt_check(repo, base, cfg, changes)
     if info is not None:
         info.update(debt_before=round(db, 2), debt_after=round(dh, 2))
+    extra = []
+    if revert:
+        debt.ok = True
+        debt.detail += " (rise allowed: exact revert)"
+        extra = [revert_check(repo, base, revert, head_tree or gitio.worktree_tree(repo))]
     checks = (config_checks(cfg, changes, cadence, mode) + static_checks(repo, base, cfg, changes,
                                                                   trial=config_override is not None)
-              + [debt])
+              + [debt] + extra)
     if require_gain:
         gained = dh < db - 1e-9
         checks.append(Check("gain", gained, f"{db:.1f} -> {dh:.1f}" if gained
@@ -859,7 +937,7 @@ def _self_test_result(c: Check, t: dict, baseline_rc: int | None) -> Check:
 
 
 def self_test(repo: Path, cfg: config.Config, log_path: Path,
-              mutate: str | None = None) -> tuple[bool, list[Check], str]:
+              mutate: str | None = None, ref_base: str | None = None) -> tuple[bool, list[Check], str]:
     """Mutate one literal in a temporary HEAD worktree. With reference tiers, every one must
     detect it; without, at least one command tier not marked `behaviour = false` must."""
     head = gitio.rev(repo, "HEAD")
@@ -880,7 +958,8 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
                if t.get("kind", "command") in ("reference", "command") and t.get("behaviour", True)}
         with open(log_path, "w") as log:
             base_checks = run_tiers(tree, head, cfg, [], "campaign", log, "refactor",
-                                    keep_going=True, kinds=("reference", "command"), only=beh)
+                                    keep_going=True, kinds=("reference", "command"), only=beh,
+                                    ref_arg=ref_base)
         broken = [c for c in base_checks if not c.ok]
         if broken:
             return False, [Check(c.name, False, f"tier {c.name} fails without mutation"
@@ -907,7 +986,7 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
         changes = gitio.changes(tree, head, None)
         with open(log_path, "a") as log:
             checks = run_tiers(tree, head, cfg, changes, "campaign", log, "refactor",
-                               keep_going=True, kinds=("reference", "command"))
+                               keep_going=True, kinds=("reference", "command"), ref_arg=ref_base)
         tiers = _selected(cfg, "campaign", "refactor")
         by_name = {t["name"]: t for t in tiers}
         base_rc = {c.name: c.exit_code for c in base_checks}

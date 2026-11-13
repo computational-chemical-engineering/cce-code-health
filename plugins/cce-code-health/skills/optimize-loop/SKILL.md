@@ -64,7 +64,10 @@ refactor commit gated in refactor mode, then optimise.
 3. **Make one change**, as small as possible. Keep the code healthy: extract kernels into
    well-named functions rather than inlining everything into a larger function; no
    copy-pasted special cases. Do not touch tests, benchmarks, reference cases, config,
-   frozen files, string literals or public signatures.
+   frozen files, string literals or public signatures. **Commit it provisionally**:
+   `perf(<area>): <what>` with trailers `Codehealth-Class: optimize` and
+   `Codehealth-Recipe: <id>` (speedup and deviations go to the run log). Gating a commit
+   works for every repo, including those whose tests need a clean tree.
 4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit> --ref-base <campaign base> --json <gate.json>`.
    Static rules and debt are checked against the last accepted commit; references and
    benchmarks against the campaign base, so tolerance and speed form one budget for the
@@ -74,17 +77,13 @@ refactor commit gated in refactor mode, then optimise.
    (the gate adds rounds itself when the median passes and the bound does not).
 5. **Read the report**: the `numeric-literals` check lists every changed numeric constant.
    A changed tolerance, iteration limit, step size or grid size is doing less work, not
-   optimising: revert it unless the human asked for exactly that.
-6. **Accept or revert.**
-   - Accept: commit with message `perf(<area>): <what>` and trailers
-     `Codehealth-Class: optimize`, `Codehealth-Recipe: <id>`,
-     `Codehealth-Speedup: <x>`, `Codehealth-Max-Deviation: <per output>`.
-   - Revert (`git checkout -- <files>`): record `gate-fail` with the failing tier
-     (tolerance, benchmark, debt, static) or `no-gain`.
-7. Log the attempt, also for reverts: `codehealth log --gate-json <gate.json> --campaign <id>
-   --target <path::qualname> --recipe <id> --hypothesis "<expected speedup, round-off>"`,
-   after the commit (accepted) or the revert. Use `--result no-gain` yourself when the gate
-   passed but you revert anyway, and `--result review-reject --reason <why>` after review.
+   optimising: drop the step unless the human asked for exactly that.
+6. **Log** the attempt right after the gate: `codehealth log --gate-json <gate.json>
+   --campaign <id> --target <path::qualname> --recipe <id> --hypothesis "<expected speedup,
+   round-off>"`. It infers `accepted` or `gate-fail` (with the tier); pass `--result
+   no-gain` when the gate passed but you drop the step anyway (step 5).
+7. **Keep or drop.** Gate passed and step 5 found nothing: the commit stays. Otherwise
+   `git reset --hard <last accepted commit>`.
 
 Every ~10 attempts, **consolidate the playbook**: compute per recipe the number of
 attempts, accepts and median speedup from the run logs with a script (never count from
@@ -101,6 +100,9 @@ Then:
 2. An independent review of the full diff before any PR: numerics are involved. Use the
    repo's review lane if it has one; otherwise a fresh-context reviewer that sees only the
    diff, the tolerances and the run log.
+   Undo a rejected step with `git revert`, gated with `codehealth gate --mode optimize
+   --base <sha before the revert> --ref-base <campaign base> --revert <sha> --json ..`
+   (exact inverse, debt may rise) and logged with `codehealth log .. --reason <why>`.
 3. PR without squash (recipe evidence points at commits). Report in about 20 lines:
    total speedup (campaign base vs head, benchmark medians), max deviation per output
    against its tolerance, debt before/after, accepted/attempted steps, recipes that paid

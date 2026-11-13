@@ -27,6 +27,7 @@ OpenFlowsheet: S16 running since ~12:00 (wp/S16, opus-engineer, incl. run/select
 Versioning: setuptools-scm since cec6dbeb (each commit a distinct pip version). OpenFlowsheet S17 pinned at 7628e737 (wp/S17 b63c9c73, their D10; five tier timeouts, config --check OK); campaign 1 starts when S16 recall is clean.
 Tier processes run in their own process group; timeout or interrupt kills the whole group, stragglers of finished tiers are killed too (reported by OpenFlowsheet-TR09 2026-11-12, xdist worker survived a hung test). Skills require a timeout per behaviour tier. 72 tests.
 Adopter feedback round 2 (OpenFlowsheet-TR09, 2026-11-13): {ref_base} placeholder, exit codes and self-test outcome (detected|missed|error) in JSON, per-tier detect_exit, debt_before/after + head_tree in gate JSON, --require-gain (exit 0 = accept), `codehealth log` (validated run-log lines, HEAD tree must equal gated tree), scan end_line/qualname, --mutate path:line:N. Skills: create all campaign files before the campaign base. 88 tests.
+Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = HEAD sha when the tree is clean; gate --revert SHA (exact inverse via merge-tree, debt may rise; log records class revert, result review-reject). Skills: commit provisionally, then gate, reset --hard on failure; seed recipe check-ladder and review anti-patterns. 97 tests.
 Still to build: skills setup, healthy-coding; playbook stats.
 
 Next action (old): `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,

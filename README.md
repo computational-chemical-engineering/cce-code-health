@@ -104,6 +104,11 @@ must pass on the unmutated HEAD first ("tier X fails without mutation").
 may set `detect_exit = [1, 5]` so that any other nonzero exit counts as an error, not a detection.
 
 Tier commands also get `{ref_base}` (the campaign base sha; equal to `{base}` without `--ref-base`).
+The self-test honours `--ref-base` for this placeholder only (without it `{ref_base}` is HEAD);
+reference comparison there stays against the unmutated HEAD, and the self-test JSON `meta.ref_base`
+records the value (null when not given).
+Gate JSON `meta.head` is the HEAD sha when the worktree equals HEAD (a committed step), else
+`worktree`; the GATE line prints `head=<sha10>` or `head=worktree`.
 Gate JSON `meta` records `debt_before`, `debt_after`, `require_gain`, `trial` and `head_tree` (tree sha of
 the judged worktree); each check records `exit_code`. `codehealth gate --require-gain` adds a static
 check `gain` that fails unless debt over the touched files dropped.
@@ -117,6 +122,23 @@ codehealth log --gate-json g.json --campaign c1 --target src/a.py::f --recipe ex
 ok means accepted) or given with `--result` (also review-reject, which needs `--reason`); an accepted
 step must be committed first (HEAD's tree must equal the gate's `head_tree`). Trial and self-test JSONs
 and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
+For results other than accepted, `head_sha` is `meta.head` when it is a sha (a committed step that
+failed keeps its evidence), else null.
+
+```bash
+codehealth gate --base <last-accepted> --revert <sha> [--revert <sha> ...]
+```
+
+`--revert` gates a commit that exactly undoes earlier accepted steps (review rejected them).
+Static check `revert`: each SHA is a non-merge ancestor of the base and the worktree tree equals the
+base with those commits reverted (newest first, via `git merge-tree --write-tree`, git >= 2.38; the
+worktree and index are not touched). A conflict or a difference fails the check and lists up to 10
+paths. The debt check passes even when debt rises ("rise allowed: exact revert"); `--require-gain`
+is a usage error. Meta `revert` lists the full shas. `codehealth log` on a revert JSON needs
+`--reason` and `--target`/`--recipe` of the rejected step, writes `class` = `revert` and
+`reverts` = the shas, infers gate-fail or review-reject (nothing else is accepted), and for
+review-reject requires the revert to be committed (HEAD's tree equals `head_tree`; `head_sha` = HEAD).
+Non-revert records carry `reverts` = [].
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
 ## Claude Code plugin
