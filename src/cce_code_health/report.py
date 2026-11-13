@@ -1,7 +1,7 @@
 """Debt, smells and the display score for analysed files."""
 from __future__ import annotations
 
-from .profiles import METRICS, Profile
+from .profiles import Profile
 from .python_backend import FileMetrics, FunctionMetrics
 
 # Display score only (same recipe as the 2026-11-11 prototype baseline).
@@ -15,7 +15,7 @@ def allowed(allows, metric: str) -> bool:
 
 def function_debt(fn: FunctionMetrics, p: Profile) -> tuple[float, dict]:
     parts = {}
-    for m in METRICS:
+    for m in p.metrics:
         excess = fn.value(m) - p.thresholds[m]
         if excess > 0 and not allowed(fn.allows, m):
             parts[m] = round(p.weights[m] * excess, 3)
@@ -23,16 +23,17 @@ def function_debt(fn: FunctionMetrics, p: Profile) -> tuple[float, dict]:
 
 
 def is_brain(fn: FunctionMetrics, p: Profile) -> bool:
-    return (fn.cognitive > p.brain_cognitive and fn.nloc > p.brain_nloc
-            and not allowed(fn.allows, "cognitive"))
+    return (fn.value(p.brain_metric) > p.brain_threshold and fn.nloc > p.brain_nloc
+            and not allowed(fn.allows, p.brain_metric))
 
 
 def _display_smells(fn: FunctionMetrics, p: Profile) -> list[str]:
-    t = p.thresholds
+    t, bm = p.thresholds, p.brain_metric
     return [s for s, hit in (
-        ("brain", is_brain(fn, p)), ("complex", fn.cognitive > t["cognitive"]),
+        ("brain", is_brain(fn, p)), ("complex", fn.value(bm) > t[bm]),
         ("long", fn.nloc > t["nloc"]), ("deep_nesting", fn.nesting > t["nesting"]),
-        ("bumpy_road", fn.bumps > t["bumps"]), ("many_args", fn.params > t["params"])) if hit]
+        ("bumpy_road", "bumps" in p.metrics and fn.bumps > t["bumps"]),
+        ("many_args", fn.params > t["params"])) if hit]
 
 
 def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
@@ -53,8 +54,7 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
             counts[s] = counts.get(s, 0) + 1
         functions.append({"name": fn.name, "qualname": f"{fm.path}::{fn.name}", "line": fn.line,
                           "end_line": fn.end, "nloc": fn.nloc,
-                          "cognitive": fn.cognitive, "nesting": fn.nesting,
-                          "bumps": fn.bumps, "params": fn.params, "boolops": fn.boolops,
+                          **{m: fn.value(m) for m in p.metrics if m != "nloc"},
                           "debt": debt, "debt_parts": parts, "brain": is_brain(fn, p)})
     penalty = sum(min(w * counts.get(s, 0), cap) for s, (w, cap) in _DISPLAY_PENALTY.items())
     penalty += {"huge_file": 2.0, "large_file": 1.0}.get(next((s for s in smells if "file" in s), ""), 0.0)

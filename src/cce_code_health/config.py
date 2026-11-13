@@ -4,6 +4,10 @@ Scope patterns use fnmatch semantics on repo-relative paths, where '*' also matc
 "src/*" is everything under src/. "/**/" also matches a single "/": "a/**/*.md" matches
 "a/x.md". Only files with a supported extension are analysed. `match` is the one matcher used
 for scope, frozen and forbid patterns.
+
+Profiles: `profile` (default python@0) measures Python. Other languages are measured only
+when a [profiles] table names a profile for them, e.g. `[profiles] cpp = "cpp@0"`; their
+files are otherwise out of scope. [profiles] may also name the Python profile.
 """
 from __future__ import annotations
 
@@ -18,7 +22,9 @@ from . import gitio, profiles
 
 CONFIG_PATH = ".codehealth/config.toml"
 SCHEMA = 1
-EXTENSIONS = {".py": "python"}
+EXTENSIONS = {".py": "python",
+              **dict.fromkeys((".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h", ".ipp",
+                               ".tpp", ".cu", ".cuh"), "cpp")}
 
 
 def _variants(pattern: str) -> list[str]:
@@ -41,9 +47,18 @@ class Config:
     exclude: list = field(default_factory=list)
     source: str = "default"
     gate: dict = field(default_factory=dict)   # raw [gate] table, interpreted by gate.py
+    other_profiles: dict = field(default_factory=dict)   # language -> Profile, not Python
+
+    def profile_for(self, path: str) -> profiles.Profile | None:
+        lang = EXTENSIONS.get(Path(path).suffix)
+        return self.profile if lang == "python" else self.other_profiles.get(lang)
+
+    def label(self) -> str:
+        """Profile names for reports: "python@0", or "python@0+cpp@0" with other languages."""
+        return "+".join([self.profile.name] + [p.name for p in self.other_profiles.values()])
 
     def in_scope(self, path: str) -> bool:
-        return (Path(path).suffix in EXTENSIONS
+        return (self.profile_for(path) is not None
                 and any(match(path, pat) for pat in self.include)
                 and not any(match(path, pat) for pat in self.exclude))
 
@@ -53,10 +68,30 @@ def parse(text: str, source: str) -> Config:
     if data.get("schema") != SCHEMA:
         raise ValueError(f"{source}: schema must be {SCHEMA}, got {data.get('schema')!r}")
     scope = data.get("scope", {})
-    return Config(profile=profiles.get(data.get("profile", "python@0")),
-                  include=list(scope.get("include", ["*"])),
+    python, other = _profiles(data)
+    return Config(profile=python, include=list(scope.get("include", ["*"])),
                   exclude=list(scope.get("exclude", [])), source=source,
-                  gate=dict(data.get("gate", {})))
+                  gate=dict(data.get("gate", {})), other_profiles=other)
+
+
+def _profiles(data: dict) -> tuple[profiles.Profile, dict]:
+    """The Python profile and {language: profile} for the others; ValueError when invalid."""
+    table = dict(data.get("profiles", {}))
+    if "profile" in data and "python" in table and table["python"] != data["profile"]:
+        raise ValueError(f"profile {data['profile']!r} and [profiles] python = "
+                         f"{table['python']!r} disagree")
+    table["python"] = table.get("python", data.get("profile", "python@0"))
+    langs = sorted(set(EXTENSIONS.values()))
+    out = {}
+    for lang, name in table.items():
+        if lang not in langs:
+            raise ValueError(f"[profiles]: unknown language {lang!r}; known: {langs}")
+        p = profiles.get(name)
+        if p.language != lang:
+            raise ValueError(f"[profiles] {lang} = {name!r} is a {p.language} profile")
+        out[lang] = p
+    python = out.pop("python")
+    return python, out
 
 
 def load(repo: Path, ref: str | None) -> Config:
@@ -67,7 +102,7 @@ def load(repo: Path, ref: str | None) -> Config:
     return parse(texts[CONFIG_PATH], f"{ref or 'worktree'}:{CONFIG_PATH}")
 
 
-TOP_KEYS = {"schema", "profile", "scope", "gate"}
+TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
              "env", "tier"}
@@ -89,7 +124,9 @@ def check(text: str) -> tuple[list[str], list[str]]:
     else:
         info.append(f"schema {SCHEMA}")
     try:
-        info.append(f"profile {profiles.get(data.get('profile', 'python@0')).name}")
+        python, other = _profiles(data)
+        info.append(f"profile {python.name}")
+        info += [f"profile {p.name} ({lang})" for lang, p in other.items()]
     except ValueError as exc:
         bad.append(str(exc))
     bad += [f"unknown top-level key {k!r}" for k in sorted(set(data) - TOP_KEYS)]

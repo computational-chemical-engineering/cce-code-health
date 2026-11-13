@@ -21,13 +21,27 @@ EPS = 1e-9
 
 def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
                 only: set[str] | None = None) -> dict[str, dict]:
-    """Reports for in-scope files at ref (None = worktree). Duplication uses the whole scope."""
+    """Reports for in-scope files at ref (None = worktree). Duplication uses the whole scope
+    of each language. The backend follows the file's profile (config.EXTENSIONS)."""
     files = [p for p in gitio.ls_files(repo, ref) if cfg.in_scope(p)]
     texts = gitio.read_files(repo, ref, files)
-    dup = duplicated_lines(texts, cfg.profile.dup_window)
-    p = cfg.profile
-    return {path: file_report(analyze(path, texts[path], p.varargs_params), dup.get(path, 0), p)
+    dup: dict[str, int] = {}
+    for p in [cfg.profile, *cfg.other_profiles.values()]:
+        group = {k: v for k, v in texts.items() if cfg.profile_for(k) is p}
+        if p.language == "cpp":
+            from .cpp_backend import blank_comments  # noqa: PLC0415 (optional backend)
+            group = {k: blank_comments(v) for k, v in group.items()}
+        dup.update(duplicated_lines(group, p.dup_window))
+    return {path: file_report(_analyze(path, texts[path], cfg.profile_for(path)), dup.get(path, 0),
+                              cfg.profile_for(path))
             for path in files if path in texts and (only is None or path in only)}
+
+
+def _analyze(path: str, text: str, p):
+    if p.language == "cpp":
+        from .cpp_backend import analyze as analyze_cpp  # noqa: PLC0415 (needs lizard)
+        return analyze_cpp(path, text)
+    return analyze(path, text, p.varargs_params)
 
 
 def totals(reports: dict[str, dict]) -> dict:
@@ -45,7 +59,8 @@ def totals(reports: dict[str, dict]) -> dict:
 
 
 def meta(repo: Path, cfg: config.Config, **extra) -> dict:
-    return {"tool": "cce-code-health", "version": __version__, "profile": cfg.profile.name,
+    langs = {"profiles": {k: p.name for k, p in cfg.other_profiles.items()}} if cfg.other_profiles else {}
+    return {"tool": "cce-code-health", "version": __version__, "profile": cfg.profile.name, **langs,
             "config": cfg.source, "repo": repo.name, **extra}
 
 
@@ -65,7 +80,7 @@ def cmd_scan(a) -> int:
     print(f"{'file':60} {'nloc':>6} {'debt':>8} {'health':>6}  file smells")
     for r in sorted(reports.values(), key=lambda r: -r["debt"])[:a.top]:
         print(f"{r['path'][-60:]:60} {r['nloc']:6} {r['debt']:8.1f} {r['health']:6.1f}  {','.join(r['file_smells'])}")
-    print(f"SCAN {repo.name}@{(ref or 'worktree')[:10]} profile={cfg.profile.name}: "
+    print(f"SCAN {repo.name}@{(ref or 'worktree')[:10]} profile={cfg.label()}: "
           f"{t['files']} files, {t['nloc']} NLOC, debt {t['debt']} ({t['debt_per_kloc']}/kNLOC), "
           f"health {t['health']}, functions with debt {t['functions_with_debt']}/{t['functions']}, "
           f"brain {t['brain_functions']}, file smells {t['file_smells']}, errors {t['errors']}")
@@ -99,8 +114,9 @@ def cmd_diff(a) -> int:
             failures.append(f"{path}: new file smell(s) {', '.join(sorted(new_smells))}")
         for f in r["functions"]:
             if f["brain"] and f["name"] not in base_brains:
+                bm = cfg.profile_for(path).brain_metric
                 failures.append(f"{path}:{f['line']} {f['name']}: new brain function "
-                                f"(cognitive {f['cognitive']}, nloc {f['nloc']})")
+                                f"({bm} {f[bm]}, nloc {f['nloc']})")
         old_sup = {(tuple(s["smells"]), s["reason"]) for s in (old["suppressions"] if old else [])}
         for s in r["suppressions"]:
             if not s["valid"]:
@@ -121,7 +137,7 @@ def cmd_diff(a) -> int:
         print(f"  FAIL {f}")
     verdict = "FAIL" if failures else "PASS"
     print(f"DIFF {verdict} {repo.name} base={base[:10]} head={(head or 'worktree')[:10]} "
-          f"profile={cfg.profile.name}: {len(ch)} touched files, debt {db:.2f} -> {dh:.2f}, "
+          f"profile={cfg.label()}: {len(ch)} touched files, debt {db:.2f} -> {dh:.2f}, "
           f"{len(failures)} failure(s)")
     return 1 if failures else 0
 
