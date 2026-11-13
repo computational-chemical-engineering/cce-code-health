@@ -88,8 +88,27 @@ Informational check `numeric-literals` (always ok): per touched in-scope .py fil
 constants (int, float, complex; not bool) removed or added between --base and head, at most 10
 entries then "+N more".
 
+Static check `architecture` (every mode; only when the base config has an `[architecture]`
+table, see architecture.py): layer and forbid rules and import cycles over the whole scope at
+base and at head; fails on a violation (rule, importer, imported) or a cycle edge (a, b) present
+at head but not at base; removed ones are listed as improvements. `codehealth diff` applies the
+same ratchet and `codehealth arch [--ref REF]` reports the current state.
+
+Restructure mode (`--mode restructure --plan .codehealth/restructure/<id>.toml`, see
+restructure.py): the plan is read from the base commit (absent or invalid: usage error, exit 2)
+with keys id, approved_by, reason, new_files (globs, each in scope) and new_public
+("path.py:Name"). As refactor mode (tiers, bitwise references, no slowdown, debt, literals as
+one multiset over all touched files, --require-gain), plus static check `plan` (every added file,
+or new path of a rename, matches new_files) and, with public_api = true, a different public-API
+rule: no public name may disappear from any module (no removed or moved modules); a definition
+may become a re-export (`from <new> import Name`) only from an added planned file whose own API
+entry is identical; public names new at head must be listed in new_public, and every listed name
+must exist at head. Meta `plan` = {path, blob (sha at base), id}; `codehealth log` writes class
+`restructure` and, as for refactor, needs a debt drop for accepted.
+
 `codehealth config --check [--config FILE]` validates the config (unknown keys, tier kinds,
-required keys, tolerance keys, thread pins, one primary benchmark, cadence and modes).
+required keys, tolerance keys, thread pins, one primary benchmark, cadence and modes, and the
+`[architecture]` table).
 With `--config` (trial), a frozen_cmd that fails in the base tree is run in the working tree
 instead, and the frozen check says so.
 
@@ -261,7 +280,11 @@ def base_tree(repo: Path, sha: str, keep: tuple = ()) -> Path:
     return tree
 
 
-def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: bool = False) -> list[Check]:
+def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: bool = False,
+                  plan: dict | None = None) -> list[Check]:
+    """Static rules; with `plan` (restructure mode) the `plan` check is added and `public_api`
+    follows the restructure rule."""
+    from . import architecture, restructure  # noqa: PLC0415
     g = cfg.gate
     checks = []
     touched = {p for _, bp, hp in changes for p in (bp, hp) if p}
@@ -282,6 +305,9 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
     checks.append(Check("forbid", not hit, ", ".join(hit[:10])))
     hit = sorted(p for p in touched if not cfg.in_scope(p))
     checks.append(Check("scope", not hit, "out of scope: " + ", ".join(hit[:10]) if hit else ""))
+    if plan is not None:
+        hit = restructure.plan_problems(plan, changes)
+        checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
 
     py = [(bp, hp) for _, bp, hp in changes
           if (bp and cfg.in_scope(bp)) or (hp and cfg.in_scope(hp))]
@@ -296,7 +322,10 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         gone, new = lb - lh, lh - lb
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
         checks.append(Check("literals", not gone and not new, detail[:400]))
-    if g.get("public_api", False):
+    if g.get("public_api", False) and plan is not None:
+        problems = restructure.public_api_problems(plan, py, tb, th, _public_api)
+        checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
+    elif g.get("public_api", False):
         problems = []
         for bp, hp in py:
             ab = _public_api(tb[bp], bp) if bp in tb else {}
@@ -311,6 +340,11 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
                     problems.append(f"{where}: {name}{s} -> {ah[name]}")
             problems += [f"{where}: {n} added (make it private?)" for n in ah if n not in ab]
         checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
+    arch = architecture.compare_refs(repo, base, None, cfg)
+    if arch is not None:
+        fail, gain = arch
+        checks.append(Check("architecture", not fail, "; ".join((fail + gain)[:5])
+                            + (f"; +{len(fail + gain) - 5} more" if len(fail + gain) > 5 else "")))
     checks.append(numeric_literals(py, tb, th))
     return checks
 
@@ -837,7 +871,7 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
          config_override: Path | None = None, mode: str = "refactor",
          ref_base: str | None = None, require_gain: bool = False,
          info: dict | None = None, revert: list[str] | None = None,
-         head_tree: str | None = None) -> tuple[list[Check], str, str]:
+         head_tree: str | None = None, plan: str | None = None) -> tuple[list[Check], str, str]:
     """config_override is for local trials only; CI must use the base's committed config.
 
     mode "refactor": references bitwise, benchmark may not slow down beyond max_slowdown.
@@ -849,13 +883,27 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     debt_before and debt_after (rounded to 2 decimals). With `revert` (SHAs) a static check
     `revert` requires the worktree tree (`head_tree`) to equal base with those commits reverted,
     and the debt check passes even when debt rises.
+    mode "restructure" (needs `plan`, a path under .codehealth/restructure/ read at base): as
+    refactor, plus the `plan` check and the restructure public-API rule; `info["plan"]` receives
+    {path, blob, id}.
     """
-    if mode not in ("refactor", "optimize"):
+    if mode not in ("refactor", "optimize", "restructure"):
         raise ValueError(f"unknown mode {mode!r}")
+    if (mode == "restructure") != bool(plan):
+        raise ValueError("--mode restructure needs --plan, and --plan is only for --mode restructure")
+    if plan and revert:
+        raise ValueError("--plan and --revert are incompatible")
     base = gitio.merge_base(repo, base_ref, "HEAD")
     ref_sha = gitio.merge_base(repo, ref_base, "HEAD") if ref_base else base
     cfg = (config.parse(config_override.read_text(), f"override:{config_override}")
            if config_override else config.load(repo, base))
+    plan_data = None
+    if plan:
+        from .restructure import load_plan  # noqa: PLC0415
+        plan_data = load_plan(repo, base, plan, cfg)
+        if info is not None:
+            info["plan"] = {"path": plan_data["path"], "blob": plan_data["blob"], "id": plan_data["id"]}
+    mode = "refactor" if mode == "restructure" else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
     debt, db, dh = debt_check(repo, base, cfg, changes)
     if info is not None:
@@ -866,7 +914,8 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         debt.detail += " (rise allowed: exact revert)"
         extra = [revert_check(repo, base, revert, head_tree or gitio.worktree_tree(repo))]
     checks = (config_checks(cfg, changes, cadence, mode) + static_checks(repo, base, cfg, changes,
-                                                                  trial=config_override is not None)
+                                                                  trial=config_override is not None,
+                                                                  plan=plan_data)
               + [debt] + extra)
     if require_gain:
         gained = dh < db - 1e-9

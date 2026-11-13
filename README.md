@@ -141,6 +141,60 @@ review-reject requires the revert to be committed (HEAD's tree equals `head_tree
 Non-revert records carry `reverts` = [].
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
+### Architecture rules
+
+```toml
+[architecture]
+roots = ["src"]                 # src/pkg/mod.py -> pkg.mod, src/pkg/__init__.py -> pkg
+type_checking = false           # false: imports under `if TYPE_CHECKING:` are ignored
+cycle_depth = 2                 # cycles between packages truncated to this many dotted parts
+[[architecture.layers]]
+name = "app-layers"
+order = ["pkg.application", "pkg.services", "pkg.domain"]   # top to bottom
+[[architecture.forbid]]
+name = "domain-pure"
+from = ["pkg.domain"]
+to = ["pkg.application", "requests"]
+reason = "domain code has no I/O"
+```
+
+```bash
+codehealth arch [--ref REF] [--json FILE]   # report violations by rule, and import cycles
+```
+
+"a.b" matches a.b and a.b.*. Imports are read from every in-scope .py file under a root, at any
+nesting level; relative imports are resolved and `from pkg import name` counts as `pkg.name` when
+that module exists. A module may not import a module of a higher layer; a `from` module may not
+import a `to` module; cycles are strongly connected components of the internal import graph
+truncated to `cycle_depth` parts, each edge with a file:line example. The table is optional
+(absent: off) and checked by `config --check`. It is a ratchet: `codehealth diff` and the gate's
+static check `architecture` (every mode) fail on a violation (rule, importer, imported) or a cycle
+edge that is new at head, and list removed ones as improvements. Existing violations pass.
+
+### Restructure steps
+
+```bash
+codehealth gate --base main --mode restructure --plan .codehealth/restructure/split-solver.toml
+```
+
+```toml
+# .codehealth/restructure/split-solver.toml, committed (and reviewed) before the step
+id = "split-solver"
+approved_by = "jane"
+reason = "solver.py mixes assembly and time stepping"
+new_files = ["src/pkg/solver/assembly.py"]
+new_public = ["src/pkg/solver/assembly.py:assemble"]
+```
+
+Moves code into new modules under a human-approved plan, read from the base commit (absent:
+exit 2; the step itself cannot touch `.codehealth/`). Everything runs as in refactor mode (bitwise
+references, no slowdown, debt may not rise, string literals as one multiset over all touched
+files), plus: added files must match `new_files` (check `plan`); no public name may disappear from
+any module, and a definition may become a re-export `from <new module> import Name` only when the
+planned new file defines it with the identical API entry; new public names must be listed in
+`new_public`, and each listed name must exist at head. Gate JSON `meta.plan` = {path, blob, id};
+`codehealth log` records class `restructure` (accepted needs a debt drop, as for refactor).
+
 ## Claude Code plugin
 
 ```

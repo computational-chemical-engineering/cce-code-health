@@ -41,6 +41,7 @@ class Config:
     exclude: list = field(default_factory=list)
     source: str = "default"
     gate: dict = field(default_factory=dict)   # raw [gate] table, interpreted by gate.py
+    architecture: dict = field(default_factory=dict)   # raw [architecture] table (architecture.py)
 
     def in_scope(self, path: str) -> bool:
         return (Path(path).suffix in EXTENSIONS
@@ -56,7 +57,8 @@ def parse(text: str, source: str) -> Config:
     return Config(profile=profiles.get(data.get("profile", "python@0")),
                   include=list(scope.get("include", ["*"])),
                   exclude=list(scope.get("exclude", [])), source=source,
-                  gate=dict(data.get("gate", {})))
+                  gate=dict(data.get("gate", {})),
+                  architecture=dict(data.get("architecture", {})))
 
 
 def load(repo: Path, ref: str | None) -> Config:
@@ -67,7 +69,7 @@ def load(repo: Path, ref: str | None) -> Config:
     return parse(texts[CONFIG_PATH], f"{ref or 'worktree'}:{CONFIG_PATH}")
 
 
-TOP_KEYS = {"schema", "profile", "scope", "gate"}
+TOP_KEYS = {"schema", "profile", "scope", "gate", "architecture"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
              "env", "tier"}
@@ -96,6 +98,14 @@ def check(text: str) -> tuple[list[str], list[str]]:
     scope, gate = data.get("scope", {}), data.get("gate", {})
     bad += [f"unknown key {k!r} in [scope]" for k in sorted(set(scope) - SCOPE_KEYS)]
     bad += [f"unknown key {k!r} in [gate]" for k in sorted(set(gate) - GATE_KEYS)]
+    if "architecture" in data:
+        from .architecture import check_config  # noqa: PLC0415 (architecture imports config)
+        arch_bad = check_config(data["architecture"])
+        bad += arch_bad
+        if not arch_bad:
+            arch = data["architecture"]
+            info.append(f"architecture: {len(arch.get('layers', []))} layer rule(s), "
+                        f"{len(arch.get('forbid', []))} forbid rule(s), cycle_depth {arch.get('cycle_depth', 2)}")
     tiers = gate.get("tier", [])
     names = [t.get("name") for t in tiers]
     bad += [f"duplicate tier name {n!r}" for n in sorted({n for n in names if names.count(n) > 1})]

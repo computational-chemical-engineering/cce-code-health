@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tempfile
 
-from . import __version__, config, gitio
+from . import __version__, architecture, config, gitio
 from . import gate as gatemod
 from .duplication import duplicated_lines
 from .python_backend import analyze
@@ -113,9 +113,14 @@ def cmd_diff(a) -> int:
         if abs(d1 - d0) > EPS:
             name = hp if bp in (None, hp) else f"{bp} -> {hp}"
             rows.append(f"  {st} {name}: debt {d0:.1f} -> {d1:.1f}")
+    arch = architecture.compare_refs(repo, base, head, cfg)   # None without [architecture]
+    if arch:
+        failures += arch[0]
+        rows += [f"  {g}" for g in arch[1]]
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
                         "debt_base": round(db, 3), "debt_head": round(dh, 3),
-                        "failures": failures, "base": rb, "head": rh})
+                        "failures": failures, "base": rb, "head": rh,
+                        **({"architecture_improvements": arch[1]} if arch else {})})
     print("\n".join(rows))
     for f in failures:
         print(f"  FAIL {f}")
@@ -124,6 +129,20 @@ def cmd_diff(a) -> int:
           f"profile={cfg.profile.name}: {len(ch)} touched files, debt {db:.2f} -> {dh:.2f}, "
           f"{len(failures)} failure(s)")
     return 1 if failures else 0
+
+
+def cmd_arch(a) -> int:
+    repo = Path(a.repo).resolve()
+    ref = gitio.rev(repo, a.ref) if a.ref else None
+    cfg = config.load(repo, ref)
+    res = architecture.analyse(repo, ref, cfg)
+    if res is None:
+        raise ValueError(f"{cfg.source}: no [architecture] table")
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), **architecture.to_json(res)})
+    print("\n".join(architecture.report_lines(res)))
+    print(f"ARCH {repo.name}@{(ref or 'worktree')[:10]}: {res.files} files, {len(res.imports)} imports, "
+          f"{len(res.violations)} violation(s), {len(res.cycles)} cycle(s)")
+    return 0
 
 
 def cmd_hotspots(a) -> int:
@@ -190,7 +209,7 @@ def cmd_gate(a) -> int:
     checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
                                           Path(a.config).resolve() if a.config else None, a.mode,
                                           a.ref_base, require_gain=a.require_gain, info=info,
-                                          revert=revert, head_tree=head_tree)
+                                          revert=revert, head_tree=head_tree, plan=a.plan)
     if revert:
         revert = [gitio.rev(repo, s) for s in revert if _resolves(repo, s)]
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
@@ -326,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, fn, help_ in (("scan", cmd_scan, "score every in-scope file"),
                             ("diff", cmd_diff, "ratchet: compare merge-base and head"),
                             ("hotspots", cmd_hotspots, "rank files by commits x debt"),
+                            ("arch", cmd_arch, "architecture rules: layers, forbidden imports, cycles"),
                             ("gate", cmd_gate, "behaviour gate: static rules and tiers, base vs worktree")):
         p = sub.add_parser(name, help=help_)
         p.set_defaults(fn=fn)
@@ -352,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--hypothesis")
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")
     sub.choices["scan"].add_argument("--ref", help="commit to scan (default: working tree)")
+    sub.choices["arch"].add_argument("--ref", help="commit to analyse (default: working tree)")
     sub.choices["diff"].add_argument("--base", default="HEAD",
                                      help="base ref; its merge-base with head is used (default HEAD)")
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")
@@ -361,8 +382,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--ref-base", help="campaign base for reference and benchmark tiers "
                                      "(merge-base is used; default: same as --base); also exposed "
                                      "to tier commands as {ref_base}")
-    sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize"), default="refactor",
-                                     help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup")
+    sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize", "restructure"), default="refactor",
+                                     help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup; "
+                                     "restructure: refactor plus new modules under --plan")
+    sub.choices["gate"].add_argument("--plan", help="restructure mode: approved plan under "
+                                     ".codehealth/restructure/, read from the base commit")
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
     sub.choices["gate"].add_argument("--log", help="full log of tier commands")
     sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")
