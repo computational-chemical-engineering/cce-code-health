@@ -154,3 +154,11 @@ def test_moved_class_gains_member_only_when_listed(repo, capsys, extra, rc):
     assert gate(repo, plan=plan) == rc
     out = capsys.readouterr().out
     assert ("Calc.extra added to re-exported Calc" in out) == (rc == 1)
+
+
+def test_binders_accept_keyword_only_parameters_without_default():
+    import ast
+    from cce_code_health.restructure import _binders
+    for src in ("def f(*, x): pass\n", "def g(a, *, x, y=1): pass\n", "async def h(*, x): pass\n"):
+        names, star = _binders(ast.parse(src).body[0])
+        assert names == {src.split()[1 if src.startswith("def") else 2].split("(")[0]} and not star

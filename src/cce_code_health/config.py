@@ -114,7 +114,7 @@ GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_g
              "env", "tier", "flags", "flag_patterns"}
 TIER_KEYS = {"name", "cadence", "kind", "cmd", "outputs", "tolerance", "timeout", "primary",
              "min_speedup", "max_slowdown", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit",
-             "skip_exit", "fail_regex", "format", "ignore_exit", "order", "band", "last"}
+             "skip_exit", "fail_regex", "same_lines", "format", "ignore_exit", "order", "band", "last"}
 KINDS = ("command", "reference", "benchmark", "findings", "convergence")
 THREAD_PINS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
@@ -230,6 +230,10 @@ def _build_tier_problems(t: dict, kind: str, where: str) -> list[str]:
         bad.append(f"{where}: skip_exit must be an integer or a non-empty list of integers, got {se!r}")
     if "fail_regex" in t:
         bad += _regex_problem(t["fail_regex"], f"{where}: fail_regex")
+    if "same_lines" in t:
+        bad += _regex_problem(t["same_lines"], f"{where}: same_lines")
+        if t.get("kind", "command") != "reference":
+            bad.append(f"{where}: same_lines is for reference tiers (they run at base and head)")
     if kind == "findings":
         if t.get("format", "gcc") != "gcc":
             bad.append(f"{where}: format must be gcc, got {t['format']!r}")

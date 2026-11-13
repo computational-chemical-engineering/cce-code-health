@@ -237,6 +237,16 @@ last = 2
 - `skip_exit` and `fail_regex` work on every tier kind and on every run of it (base and head).
   A match fails the tier ("not run (exit 77)", "output matched fail_regex: <line>") and counts
   as an error, not a detection, in the self-test.
+- `same_lines` (reference tiers): a regex; matching output lines, with the tree path replaced by
+  `{repo}`, must be the same at base and head. The base side runs in a worktree under the git
+  directory, where a sibling checkout (`../core`) does not exist: a build that falls back to
+  FetchContent or another install there compiles against a different dependency, and the
+  bitwise comparison then measures the wrong thing. Match lines the build prints on **every**
+  configure (your own `message()` lines naming resolved paths and versions): CMake's
+  `-- Found X` lines appear only when a cached result changes, so an incremental head
+  configure omits them. Keep configure output in the log (no `>/dev/null`). Pin such
+  dependencies explicitly in the tier command as well (`FETCHCONTENT_SOURCE_DIR_<DEP>`,
+  `FETCHCONTENT_FULLY_DISCONNECTED=ON`).
 - `findings` runs `cmd` in the tree of `--base` (the last accepted step) and at head, parses
   `file:line:col: warning|error: ... [check]` (gcc, clang with `-fdiagnostics-show-option`,
   clang-tidy), maps absolute paths in either tree to repo-relative ones (others become

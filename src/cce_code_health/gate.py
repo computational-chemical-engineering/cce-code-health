@@ -114,6 +114,11 @@ Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
   of the tier, base and head (not the logged command line). A match fails the tier with "output
   matched fail_regex: <first matching line, 120 chars>"; in the self-test it is outcome `error`.
   Use it for ctest, which exits 0 when tests are skipped. A failing base run is not cached.
+- `same_lines` (reference tiers): a Python regex; the output lines of a run that match it, with
+  the tree path replaced by `{repo}`, must be the same at base and head (sorted). For configure
+  lines that name resolved dependencies or toolchains (`-- Found X: <path>`), so a base worktree
+  that silently fetched or found a different dependency fails ("same_lines differ"). Base lines
+  are cached with the base outputs; keep the configure output in the log (no `>/dev/null`).
 - kind `findings` (keys cmd, format = "gcc", ignore_exit = true, timeout, cadence, modes,
   skip_exit, fail_regex): runs cmd in the tree of `--base` (not ref_base) and at head, parses
   `file:line:col: warning|error: ... [check]` lines (gcc, clang, clang-tidy), maps file paths to
@@ -616,47 +621,75 @@ def _cache_dir(repo: Path, sha: str, name: str) -> Path:
     return _common_dir(repo) / "cache" / sha / re.sub(r"[^\w.-]", "_", name)
 
 
-def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
-    """Outputs of the ref-base tree for tier t: (outputs, error, nondeterministic names).
-    Cached under <git-common-dir>/codehealth/cache/<sha>/<tier>/ with a manifest holding the
-    command, outputs and env, and the result of the determinism check (two runs, at caching time)."""
+def same_lines(t: dict, text: str, tree: Path) -> list[str]:
+    """Output lines matching the tier's `same_lines` regex, the tree path replaced by {repo},
+    sorted: what must be identical at base and head (dependency paths, toolchain versions)."""
+    rx = t.get("same_lines")
+    if not rx:
+        return []
+    roots = sorted({str(tree), os.path.realpath(tree)}, key=len, reverse=True)
+    out = []
+    for ln in text.splitlines():
+        if re.search(rx, ln):
+            for r in roots:
+                ln = ln.replace(r, "{repo}")
+            out.append(ln.rstrip())
+    return sorted(out)
+
+
+def _lines_differ(base: list[str], head: list[str]) -> str:
+    gone = [ln for ln in base if ln not in head]
+    new = [ln for ln in head if ln not in base]
+    if not gone and not new:
+        return ""
+    return ("same_lines differ between base and head (a dependency or toolchain resolved "
+            f"differently): base {gone[:2]} head {new[:2]}")
+
+
+def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list, list]:
+    """Outputs of the ref-base tree for tier t: (outputs, error, nondeterministic names,
+    same_lines of the first base run). Cached under <git-common-dir>/codehealth/cache/<sha>/<tier>/
+    with a manifest holding the command, outputs, env and same_lines regex, the result of the
+    determinism check (two runs, at caching time) and the base same_lines."""
     names, timeout = list(t["outputs"]), t.get("timeout")
     cmd = _fill(t["cmd"], repo="<repo>", base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out="<out>")
-    key = {"cmd": cmd, "outputs": names, "env": ctx.env}
+    key = {"cmd": cmd, "outputs": names, "env": ctx.env, "same_lines": t.get("same_lines")}
     cdir = _cache_dir(ctx.repo, ctx.ref_base, t["name"])
     try:
         m = json.loads((cdir / "manifest.json").read_text())
         if m.get("key") == key and (m["nondet"] or all((cdir / "out" / n).is_file() for n in names)):
             ctx.log.write(f"\n(reference cache hit: {cdir})\n")
             if m["nondet"]:
-                return None, "", m["nondet"]
-            return {n: (cdir / "out" / n).read_bytes() for n in names}, "", []
+                return None, "", m["nondet"], m.get("lines", [])
+            return {n: (cdir / "out" / n).read_bytes() for n in names}, "", [], m.get("lines", [])
     except (OSError, ValueError, KeyError):
         pass
     shutil.rmtree(cdir, ignore_errors=True)
-    tree, runs = get_tree(), []
-    for _ in range(2):
+    tree, runs, lines = get_tree(), [], []
+    for i in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
         try:
-            rc, _, _ = _run_checked(t, _fill(t["cmd"], repo=str(tree), base=ctx.ref_base,
-                                             ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out=str(out)),
-                                    tree, ctx.env, ctx.log, timeout)
+            rc, _, text = _run_checked(t, _fill(t["cmd"], repo=str(tree), base=ctx.ref_base,
+                                                ref_base=ctx.ref_arg or ctx.ref_base, files=ctx.files, out=str(out)),
+                                       tree, ctx.env, ctx.log, timeout)
             if rc != 0:
-                return None, f"exit {rc} at base", []
+                return None, f"exit {rc} at base", [], []
+            if i == 0:
+                lines = same_lines(t, text, tree)
             runs.append(_outputs(out, names))
         finally:
             shutil.rmtree(out, ignore_errors=True)
     missing = [n for n in names if runs[0][n] is None]
     if missing:
-        return None, "missing output: " + ", ".join(missing), []
+        return None, "missing output: " + ", ".join(missing), [], lines
     nondet = [n for n in names if runs[0][n] != runs[1][n]]
     (cdir / "out").mkdir(parents=True)
     if not nondet:
         for n in names:
             (cdir / "out" / n).parent.mkdir(parents=True, exist_ok=True)
             (cdir / "out" / n).write_bytes(runs[0][n])
-    (cdir / "manifest.json").write_text(json.dumps({"key": key, "nondet": nondet}))
-    return (None if nondet else runs[0]), "", nondet
+    (cdir / "manifest.json").write_text(json.dumps({"key": key, "nondet": nondet, "lines": lines}))
+    return (None if nondet else runs[0]), "", nondet, lines
 
 
 def _changed_lines(repo: Path, base: str, bp: str | None, hp: str) -> set[int]:
@@ -744,7 +777,7 @@ def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout,
 def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
     """(ok, detail, exit code of the head run or None if it did not get that far)."""
     names, timeout = t["outputs"], t.get("timeout")
-    b, err, nondet = _base_outputs(t, ctx, get_tree)
+    b, err, nondet, base_lines = _base_outputs(t, ctx, get_tree)
     if err:
         return False, err, None
     if nondet:
@@ -755,12 +788,17 @@ def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
         cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.ref_base, ref_base=ctx.ref_arg or ctx.ref_base,
                     files=ctx.files, out=str(out))
         try:
+            text = ""
             if i == 0 and t.get("coverage", False):
                 rc, executed = _run_covered(cmd, ctx.repo, ctx.env, ctx.log, timeout, t)
             else:
-                rc, _, _ = _run_checked(t, cmd, ctx.repo, ctx.env, ctx.log, timeout)
+                rc, _, text = _run_checked(t, cmd, ctx.repo, ctx.env, ctx.log, timeout)
             if rc != 0:
                 return False, f"exit {rc} at head", rc
+            if t.get("same_lines") and (i == 1 or not t.get("coverage", False)):
+                differ = _lines_differ(base_lines, same_lines(t, text, ctx.repo))
+                if differ:
+                    return False, differ, 0
             runs.append(_outputs(out, names))
         finally:
             shutil.rmtree(out, ignore_errors=True)

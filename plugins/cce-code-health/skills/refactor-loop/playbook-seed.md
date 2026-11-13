@@ -28,5 +28,10 @@ side effects and floating-point operations, same exceptions and messages.
   helper. Use `check-ladder` once instead.
 - **Same complexity, new address**: a helper that carries all the branching of the
   original while the caller becomes one line.
+- **Fixing findings by rote** (C++): a refactor step never changes a parameter or capture
+  only to silence a clang-tidy check. Example: `performance-unnecessary-value-param` on
+  `Kokkos::View` parameters; Views are reference-counted handles passed by value on purpose
+  (that is how they reach device lambdas). The findings tier is a ratchet against new
+  findings, not a to-do list.
 
 Evidence: OpenFlowsheet S17 review 1 (2026-11-13), 12 steps, 2 review-rejects.

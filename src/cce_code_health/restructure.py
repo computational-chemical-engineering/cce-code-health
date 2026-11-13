@@ -103,7 +103,8 @@ def _binders(stmt) -> tuple[set[str], bool]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
             stack += node.decorator_list + ([] if isinstance(node, ast.ClassDef) else
-                                            node.args.defaults + node.args.kw_defaults)
+                                            node.args.defaults
+                                            + [d for d in node.args.kw_defaults if d is not None])
             continue
         if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             continue

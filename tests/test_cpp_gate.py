@@ -378,3 +378,38 @@ def test_self_test_mutates_a_cpp_literal(tmp_path):
     assert rc == 0 and data["checks"][0]["outcome"] == "detected"
     assert main(["gate", "--repo", str(tmp_path), "--self-test",
                  "--log", str(tmp_path.parent / "st.log")]) == 2       # C++ needs --mutate
+
+
+# -- same_lines: dependency resolution must not differ between base and head --------------------
+
+SAME = """
+schema = 1
+[scope]
+include = ["pkg/*"]
+[[gate.tier]]
+name = "ref"
+kind = "reference"
+outputs = ["o.txt"]
+timeout = 60
+same_lines = '^-- Found dep'
+cmd = "if [ -d {repo}/../sib ]; then echo '-- Found dep: sibling'; else echo '-- Found dep: fetched v1.3.0'; fi; echo '-- Found depdir: {repo}/x'; echo 42 > {out}/o.txt"
+"""
+
+
+def test_same_lines_catches_a_dependency_resolved_differently(tmp_path):
+    # the dem case: a sibling checkout exists next to the repo but not next to the base worktree
+    assert not check(SAME)[1]
+    (tmp_path / "r").mkdir()
+    repo = make_repo(tmp_path / "r", SAME)
+    doc_edit(repo)
+    rc, checks = gate_json(repo)
+    assert rc == 0 and checks["ref"]["ok"]                     # tree paths normalised to {repo}
+    (tmp_path / "sib").mkdir()
+    rc, checks = gate_json(repo)                               # base lines come from the cache
+    assert rc == 1 and "same_lines differ" in checks["ref"]["detail"]
+    assert "fetched v1.3.0" in checks["ref"]["detail"] and "sibling" in checks["ref"]["detail"]
+
+
+def test_same_lines_only_on_reference_tiers():
+    bad = check(SAME.replace('kind = "reference"', 'kind = "command"'))[1]
+    assert any("same_lines is for reference tiers" in b for b in bad)

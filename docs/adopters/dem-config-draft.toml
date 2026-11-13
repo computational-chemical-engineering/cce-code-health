@@ -1,5 +1,8 @@
-# DRAFT .codehealth/config.toml for peclet-dem (code_health, 2026-11-13), for peclet_health to
-# review and commit in dem before the campaign base. Not used by cce-code-health itself.
+# DRAFT .codehealth/config.toml for peclet-dem (code_health, 2026-11-13), as SENT for review.
+# peclet_health committed a revised version on dem branch code-health (3d41683): pinned core via
+# FETCHCONTENT_SOURCE_DIR_PECLET_SIB_PECLET-CORE + FULLY_DISCONNECTED (the base worktree has no
+# sibling ../core and silently fetched core v1.3.0), own core Python build, CUDA with tests and
+# MPI, a blocking clang_format tier, clang-tidy -isystem for GCC's omp.h. dem's copy is the truth.
 # Sources: dem e375b97 (CMakeLists.txt, tests/regression/state_hash.py, .gitignore), timings
 # and traps measured by peclet_health on TRS2 (2026-11-13).
 #
