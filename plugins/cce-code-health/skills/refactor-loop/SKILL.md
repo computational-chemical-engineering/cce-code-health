@@ -20,10 +20,17 @@ campaign is one of its work packages and follows those rules.
    campaign; the gate forbids it anyway.
    Every behaviour tier needs a `timeout` (a hung test otherwise stalls the loop; on
    timeout the gate kills the tier's whole process group). A timeout counts as detected
-   in the self-test and as `gate-fail` in a step. Missing timeouts: ask the human.
+   in the self-test and as `gate-fail` in a step (unless the tier sets `detect_exit`:
+   then other nonzero codes, such as a usage error, count as `error`, not detected).
+   Missing timeouts: ask the human. A tier that needs the campaign base (an impacted-test
+   selector with one coverage map for the campaign) uses `{ref_base}`, not `{base}`.
 3. Clean tree, campaign branch (repo naming convention), in a worktree if other agents or
-   sessions use the repo.
-4. `codehealth gate --self-test --mutate <path:line>` on a literal in a function the tests
+   sessions use the repo. **Create every file the campaign will write before the campaign
+   base commit**: `.codehealth/playbook.md` (a stub is fine), brief and notes locations.
+   Add no files during the campaign: impacted-test selectors may fall back to the full
+   suite for any file added after the base, which makes every later step slow.
+4. `codehealth gate --self-test --mutate <path:line[:N]>` (N: the Nth literal on the
+   line) on a literal in a function the tests
    execute passes: the gate detects a real change. Without this, every later PASS is
    meaningless.
 5. Baseline: `codehealth scan --json <git-common-dir>/codehealth/runs/<campaign>-base.json` and
@@ -36,9 +43,10 @@ campaign is one of its work packages and follows those rules.
    Skip frozen files and targets that failed in the last three attempts.
 2. **Coverage strength.** The target must be exercised by the behaviour tiers:
    - with an impacted-test selector (OpenFlowsheet: `scripts/test_impact.py select --lines
-     path:a-b`), at least one test must execute the target's lines;
+     path:a-b`, with a = `line` and b = `end_line` from the scan JSON), at least one test
+     must execute the target's lines;
    - if the target contains numeric literals, run `codehealth gate --self-test --mutate
-     path:line` on one or two of them: the gate must detect the mutation.
+     path:line[:N]` on one or two of them: the gate must detect the mutation.
    If not covered: either pick another target, or write characterisation tests first in a
    **separate commit** that passes at base, outside the refactor step (repo process
    decides who may add tests; in OpenFlowsheet that is a test-spec task).
@@ -50,21 +58,22 @@ campaign is one of its work packages and follows those rules.
    same evaluation order of side effects and floating-point operations, same exceptions,
    same logging and messages, same public names and signatures, same string literals.
    New helpers are private (`_name`) and live in the same module.
-5. **Gate.** `codehealth gate --mode refactor --base <last accepted commit>`.
-   It checks scope, frozen and forbidden paths, literals, public API, debt (may not rise),
-   then the repo's tiers (tests, identity, references bitwise, benchmark no slowdown).
-6. **Accept** only if the gate passes **and** debt over the touched files went down
-   (`codehealth diff --base <last accepted>` shows it). Commit:
-   `refactor(<area>): <what>` with trailers `Codehealth-Class: refactor`,
-   `Codehealth-Recipe: <id>`, `Codehealth-Debt: <before> -> <after>`.
-   Otherwise **revert** (`git checkout -- <files>`) and record why: `gate-fail` (which
-   tier), `no-gain`, or `review-reject`.
-7. **Log** one JSON line per attempt. During the campaign the log lives outside the
-   working tree (the gate rejects any change under `.codehealth/` in a step):
-   `$(git rev-parse --git-common-dir)/codehealth/runs/<campaign>.jsonl`. At campaign end
-   copy it to `.codehealth/runs/<campaign>.jsonl` in a separate docs commit.
-   `{"campaign","step","class":"refactor","target":"path::qualname","recipe","result",
-   "failed_tier","debt_before","debt_after","base_sha","head_sha","tool_version","model"}`.
+5. **Gate.** `codehealth gate --mode refactor --base <last accepted commit>
+   --ref-base <campaign base> --require-gain --json <gate.json>`.
+   It checks scope, frozen and forbidden paths, literals, public API, debt (must go down
+   with `--require-gain`), then the repo's tiers (tests, identity, references bitwise,
+   benchmark no slowdown). Exit 0 means accept; the summary line shows `debt=a->b`.
+6. **Accept** on exit 0: commit `refactor(<area>): <what>` with trailers
+   `Codehealth-Class: refactor`, `Codehealth-Recipe: <id>`, `Codehealth-Debt: <a> -> <b>`.
+   Otherwise **revert** (`git checkout -- <files>`).
+7. **Log** every attempt with `codehealth log --gate-json <gate.json> --campaign <id>
+   --target <path::qualname> --recipe <id> [--model <name>]`, after the commit (accepted:
+   it checks that HEAD's tree is the tree the gate judged) or after the revert. It infers
+   `accepted`, `gate-fail` (with the tier) or `no-gain`; pass `--result review-reject
+   --reason <why>` for review rejections. **Never write log lines by hand.** The log lives
+   outside the working tree during the campaign (the gate rejects any change under
+   `.codehealth/` in a step): `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`.
+   At campaign end copy it to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
 
 ## Review against gaming (every ~5 accepted steps)
 

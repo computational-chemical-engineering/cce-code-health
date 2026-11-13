@@ -99,6 +99,24 @@ codehealth gate --self-test --mutate src/a.py:42 # ... or the literal on this li
 The self-test passes (exit 0) only if every reference tier detects the mutation, which
 shows the tiers exercise the checkout under test and not an installed copy. Every behaviour tier
 must pass on the unmutated HEAD first ("tier X fails without mutation").
+`--mutate path:line:N` picks the N-th numeric literal on the line. Self-test JSON checks carry
+`outcome` (detected, missed, error), `exit_code`, `baseline_exit_code` and `detail`; a command tier
+may set `detect_exit = [1, 5]` so that any other nonzero exit counts as an error, not a detection.
+
+Tier commands also get `{ref_base}` (the campaign base sha; equal to `{base}` without `--ref-base`).
+Gate JSON `meta` records `debt_before`, `debt_after`, `require_gain`, `trial` and `head_tree` (tree sha of
+the judged worktree); each check records `exit_code`. `codehealth gate --require-gain` adds a static
+check `gain` that fails unless debt over the touched files dropped.
+
+```bash
+codehealth log --gate-json g.json --campaign c1 --target src/a.py::f --recipe extract-function
+```
+
+`codehealth log` appends one validated JSON line to `<git-common-dir>/codehealth/runs/<campaign>.jsonl`
+(`--out` overrides). The result is inferred (gate-fail, accepted, no-gain; in optimize mode all checks
+ok means accepted) or given with `--result` (also review-reject, which needs `--reason`); an accepted
+step must be committed first (HEAD's tree must equal the gate's `head_tree`). Trial and self-test JSONs
+and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
 See the docstring of `src/cce_code_health/gate.py` for the config format.
 
 ## Claude Code plugin

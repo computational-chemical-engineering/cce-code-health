@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import tempfile
@@ -152,7 +154,9 @@ def cmd_self_test(a, repo: Path, log: Path) -> int:
                         "checks": [c.__dict__ for c in checks]})
     print(f"  mutation: {what}")
     for c in checks:
-        label = "detected" if c.ok else "BASELINE" if "without mutation" in c.detail else "MISSED  "
+        label = ("detected" if c.outcome == "detected" else
+                 "BASELINE" if "without mutation" in c.detail else
+                 "ERROR   " if c.outcome == "error" else "MISSED  ")
         print(f"  {label} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
     kind = gatemod.self_test_kind(cfg)
     print(f"SELF-TEST {'PASS' if ok else 'FAIL'} {repo.name}: "
@@ -167,21 +171,103 @@ def cmd_gate(a) -> int:
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
     if a.self_test:
         return cmd_self_test(a, repo, log)
+    head_tree = gitio.worktree_tree(repo)
+    info: dict = {}
     checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
                                           Path(a.config).resolve() if a.config else None, a.mode,
-                                          a.ref_base)
+                                          a.ref_base, require_gain=a.require_gain, info=info)
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
-                                 "ref_base": ref_base, "head": "worktree", "cadence": a.cadence, "mode": a.mode, "log": str(log)},
+                                 "ref_base": ref_base, "head": "worktree", "cadence": a.cadence, "mode": a.mode,
+                                 "log": str(log), **info, "require_gain": a.require_gain,
+                                 "trial": bool(a.config), "head_tree": head_tree},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
         print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
     failed = [c.name for c in checks if not c.ok]
     verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
     print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
-          f"head=worktree mode={a.mode} cadence={a.cadence}: {len(checks) - len(failed)}/{len(checks)} checks passed"
+          f"head=worktree mode={a.mode} cadence={a.cadence} "
+          f"debt={info['debt_before']}->{info['debt_after']}: {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
           + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
     return 1 if failed else 3 if a.config else 0
+
+
+RESULTS = ("accepted", "gate-fail", "no-gain", "review-reject")
+
+
+def _infer_result(checks: list, mode: str, before: float, after: float) -> str:
+    if any(not c["ok"] for c in checks):
+        return "gate-fail"
+    return "accepted" if mode == "optimize" or after < before - EPS else "no-gain"
+
+
+def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
+    """Validate the gate JSON and the arguments; returns (checks, meta, result)."""
+    meta_ = data.get("meta", {})
+    if meta_.get("self_test") or "checks" not in data:
+        raise ValueError("--gate-json is a self-test or not a gate JSON; log needs `codehealth gate --json`")
+    if meta_.get("trial"):
+        raise ValueError("--gate-json is a trial gate (--config): not valid evidence, refusing")
+    for k in ("base", "ref_base", "mode", "head_tree", "debt_before", "debt_after"):
+        if k not in meta_:
+            raise ValueError(f"--gate-json meta lacks {k!r} (written by an older codehealth?)")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", a.campaign):
+        raise ValueError(f"--campaign must match [A-Za-z0-9._-]+, got {a.campaign!r}")
+    if a.result == "review-reject" and not a.reason:
+        raise ValueError("--result review-reject needs --reason")
+    if a.reason and a.result != "review-reject":
+        raise ValueError("--reason is only for --result review-reject")
+    checks = data["checks"]
+    failed = [c for c in checks if not c["ok"]]
+    gained = meta_["mode"] == "optimize" or meta_["debt_after"] < meta_["debt_before"] - EPS
+    result = a.result or _infer_result(checks, meta_["mode"], meta_["debt_before"], meta_["debt_after"])
+    if result == "gate-fail" and not failed:
+        raise ValueError("--result gate-fail but every check in the gate JSON passed")
+    if result != "gate-fail" and failed:
+        raise ValueError(f"--result {result} but check {failed[0]['name']} failed in the gate JSON")
+    if result == "accepted" and not gained:
+        raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']})")
+    return checks, meta_, result
+
+
+def cmd_log(a) -> int:
+    repo = Path(a.repo).resolve()
+    gj = Path(a.gate_json).resolve()
+    data = json.loads(gj.read_text())
+    checks, m, result = _check_log_args(a, data)
+    head_sha = None
+    if result == "accepted":
+        head_tree = gitio.git(repo, "rev-parse", "HEAD^{tree}").decode().strip()
+        if head_tree != m["head_tree"]:
+            raise ValueError("HEAD's tree differs from the tree the gate judged: commit the gated change "
+                             f"first (HEAD {head_tree[:10]}, gate {m['head_tree'][:10]})")
+        if head_tree == gitio.git(repo, "rev-parse", f"{m['base']}^{{tree}}").decode().strip():
+            raise ValueError("HEAD's tree equals the base's tree: nothing was committed")
+        head_sha = gitio.rev(repo, "HEAD")
+    out = (Path(a.out) if a.out else gatemod._common_dir(repo) / "runs" / f"{a.campaign}.jsonl").resolve()
+    lines = [ln for ln in out.read_text().splitlines() if ln.strip()] if out.is_file() else []
+    for ln in lines:
+        old = json.loads(ln)
+        if (old.get("campaign"), old.get("head_tree"), old.get("base_sha")) == (a.campaign, m["head_tree"], m["base"]):
+            raise ValueError(f"duplicate: campaign {a.campaign} already has step {old.get('step')} "
+                             f"for this tree and base")
+    failed = next((c["name"] for c in checks if not c["ok"]), None)
+    rec = {"campaign": a.campaign, "step": len(lines) + 1, "class": m["mode"], "target": a.target,
+           "recipe": a.recipe, "result": result, "failed_tier": failed, "reason": a.reason,
+           "debt_before": m["debt_before"], "debt_after": m["debt_after"], "base_sha": m["base"],
+           "ref_base_sha": m["ref_base"], "head_sha": head_sha, "head_tree": m["head_tree"],
+           "tool_version": m.get("version"), "logged_with": __version__, "model": a.model,
+           "hypothesis": a.hypothesis, "checks": {c["name"]: c["ok"] for c in checks},
+           "details": {c["name"]: c.get("detail", "") for c in checks},
+           "gate_json": str(gj),
+           "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "a") as f:
+        f.write(json.dumps(rec) + "\n")
+    print(f"LOG {a.campaign} step {rec['step']} {result} {a.target} "
+          f"debt {m['debt_before']} -> {m['debt_after']} ({out})")
+    return 0
 
 
 def cmd_config(a) -> int:
@@ -222,14 +308,28 @@ def main(argv: list[str] | None = None) -> int:
     pc.add_argument("--json", help=argparse.SUPPRESS)
     pc.add_argument("--check", action="store_true", help="validate .codehealth/config.toml")
     pc.add_argument("--config", help="validate this file instead of the working tree's config")
+    pl = sub.add_parser("log", help="append one validated line to a campaign run log")
+    pl.set_defaults(fn=cmd_log)
+    pl.add_argument("--repo", default=".")
+    pl.add_argument("--gate-json", required=True, help="output of `codehealth gate --json`")
+    pl.add_argument("--campaign", required=True, help="campaign id [A-Za-z0-9._-]+")
+    pl.add_argument("--target", required=True, help="path::qualname")
+    pl.add_argument("--recipe", required=True)
+    pl.add_argument("--result", choices=RESULTS, help="default: inferred from the gate JSON")
+    pl.add_argument("--reason", help="required iff --result review-reject")
+    pl.add_argument("--model")
+    pl.add_argument("--hypothesis")
+    pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")
     sub.choices["scan"].add_argument("--ref", help="commit to scan (default: working tree)")
     sub.choices["diff"].add_argument("--base", default="HEAD",
                                      help="base ref; its merge-base with head is used (default HEAD)")
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")
     sub.choices["hotspots"].add_argument("--since", help="only count commits since this date")
-    sub.choices["gate"].add_argument("--base", default="HEAD", help="base ref (merge-base is used)")
+    sub.choices["gate"].add_argument("--base", default="HEAD", help="base ref (merge-base is used; default HEAD). Ignored with "
+                                     "--self-test, which mutates HEAD")
     sub.choices["gate"].add_argument("--ref-base", help="campaign base for reference and benchmark tiers "
-                                     "(merge-base is used; default: same as --base)")
+                                     "(merge-base is used; default: same as --base); also exposed "
+                                     "to tier commands as {ref_base}")
     sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize"), default="refactor",
                                      help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup")
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
@@ -237,7 +337,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")
     sub.choices["gate"].add_argument("--self-test", action="store_true",
                                      help="mutate one literal in a temporary HEAD worktree; every reference tier must detect it")
-    sub.choices["gate"].add_argument("--mutate", help="with --self-test: mutate the literal at path:line")
+    sub.choices["gate"].add_argument("--mutate", help="with --self-test: mutate the literal at path:line "
+                                     "or path:line:N (N-th numeric literal on the line, 1-based)")
+    sub.choices["gate"].add_argument("--require-gain", action="store_true",
+                                     help="add a static check `gain`: debt over touched files must drop")
     a = ap.parse_args(argv)
     try:
         return a.fn(a)

@@ -41,10 +41,14 @@ refactor commit gated in refactor mode, then optimise.
 
 ## Campaign files
 
-- Run log: ``$(git rev-parse --git-common-dir)/codehealth/runs/<campaign-id>.jsonl` during the campaign (the gate forbids changes under `.codehealth/` in a step; copy it there in a separate docs commit at the end), one JSON object per attempt:
-  `{"campaign","step","class":"optimize","target":"path::qualname","recipe","hypothesis",
-  "result":"accepted|gate-fail|no-gain|review-reject","failed_tier","speedup",
-  "max_deviation","debt_before","debt_after","base_sha","head_sha","tool_version","model"}`.
+- Run log: `$(git rev-parse --git-common-dir)/codehealth/runs/<campaign-id>.jsonl` during
+  the campaign (the gate forbids changes under `.codehealth/` in a step; copy it there in a
+  separate docs commit at the end), one line per attempt, written only by `codehealth log`
+  (never by hand). It records result, failed tier, debt, shas, and every check's detail
+  (speedup and its bound, deviation per output).
+- Create every file the campaign will write (playbook stub, notes) before the campaign
+  base; add no files during the campaign (impacted-test selectors may fall back to the
+  full suite for files added after the base).
 - Playbook: the seed recipes in `playbook-seed.md` (next to this file) plus the repo's
   `.codehealth/playbook.md`, section "Performance recipes" (repo recipes override seed
   recipes with the same id; `disable: <id>` lines switch a seed recipe off).
@@ -61,7 +65,7 @@ refactor commit gated in refactor mode, then optimise.
    well-named functions rather than inlining everything into a larger function; no
    copy-pasted special cases. Do not touch tests, benchmarks, reference cases, config,
    frozen files, string literals or public signatures.
-4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit> --ref-base <campaign base>`.
+4. **Gate**: `codehealth gate --mode optimize --base <last accepted commit> --ref-base <campaign base> --json <gate.json>`.
    Static rules and debt are checked against the last accepted commit; references and
    benchmarks against the campaign base, so tolerance and speed form one budget for the
    whole campaign. References must stay within tolerance (head run twice, deterministic);
@@ -77,7 +81,10 @@ refactor commit gated in refactor mode, then optimise.
      `Codehealth-Speedup: <x>`, `Codehealth-Max-Deviation: <per output>`.
    - Revert (`git checkout -- <files>`): record `gate-fail` with the failing tier
      (tolerance, benchmark, debt, static) or `no-gain`.
-7. Append the run record. One record per attempt, also for reverts.
+7. Log the attempt, also for reverts: `codehealth log --gate-json <gate.json> --campaign <id>
+   --target <path::qualname> --recipe <id> --hypothesis "<expected speedup, round-off>"`,
+   after the commit (accepted) or the revert. Use `--result no-gain` yourself when the gate
+   passed but you revert anyway, and `--result review-reject --reason <why>` after review.
 
 Every ~10 attempts, **consolidate the playbook**: compute per recipe the number of
 attempts, accepts and median speedup from the run logs with a script (never count from

@@ -72,7 +72,7 @@ SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
              "env", "tier"}
 TIER_KEYS = {"name", "cadence", "kind", "cmd", "outputs", "tolerance", "timeout", "primary",
-             "min_speedup", "max_slowdown", "repeat", "max_repeat", "modes", "behaviour", "coverage"}
+             "min_speedup", "max_slowdown", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit"}
 KINDS = ("command", "reference", "benchmark")
 THREAD_PINS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
@@ -115,6 +115,10 @@ def check(text: str) -> tuple[list[str], list[str]]:
             from .compare import TOLERANCE_KEYS  # noqa: PLC0415
             bad += [f"{where}: unknown tolerance key {k!r} (allowed: {', '.join(TOLERANCE_KEYS)})"
                     for k in sorted(set(t.get("tolerance", {})) - set(TOLERANCE_KEYS))]
+        de = t.get("detect_exit")
+        if de is not None and not (isinstance(de, list) and de and all(
+                isinstance(x, int) and not isinstance(x, bool) and x != 0 for x in de)):
+            bad.append(f"{where}: detect_exit must be a non-empty list of nonzero integers, got {de!r}")
         if t.get("cadence", "step") not in ("step", "campaign"):
             bad.append(f"{where}: cadence must be step or campaign, got {t['cadence']!r}")
         bad += [f"{where}: modes entry {m!r} must be refactor or optimize"

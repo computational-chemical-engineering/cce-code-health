@@ -51,7 +51,8 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
         ds = _display_smells(fn, p)
         for s in ds:
             counts[s] = counts.get(s, 0) + 1
-        functions.append({"name": fn.name, "line": fn.line, "nloc": fn.nloc,
+        functions.append({"name": fn.name, "qualname": f"{fm.path}::{fn.name}", "line": fn.line,
+                          "end_line": fn.end, "nloc": fn.nloc,
                           "cognitive": fn.cognitive, "nesting": fn.nesting,
                           "bumps": fn.bumps, "params": fn.params, "boolops": fn.boolops,
                           "debt": debt, "debt_parts": parts, "brain": is_brain(fn, p)})

@@ -101,3 +101,27 @@ def commit_counts(repo: Path, since: str | None = None) -> Counter:
         else:
             break
     return counts
+
+
+def worktree_tree(repo: Path) -> str:
+    """Tree sha of the working tree (tracked + untracked, not ignored), without touching the real index."""
+    import os  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+    index = repo / git(repo, "rev-parse", "--git-path", "index").decode().strip()
+    fd, tmp = tempfile.mkstemp(prefix="codehealth-index-")
+    os.close(fd)
+    try:
+        if index.is_file():
+            shutil.copyfile(index, tmp)
+        else:
+            os.unlink(tmp)
+        env = {**os.environ, "GIT_INDEX_FILE": tmp}
+        for args in (["add", "-A"], ["write-tree"]):
+            r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, env=env)
+            if r.returncode != 0:
+                raise GitError(f"git {' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
+        return r.stdout.decode().strip()
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)

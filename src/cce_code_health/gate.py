@@ -38,7 +38,9 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     min_speedup = 1.2
     max_slowdown = 0.03               # every other benchmark tier: may not slow down beyond this
 
-Placeholders in cmd: {repo} {base} {out} {files} (touched head paths, shell-quoted).
+Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted).
+{ref_base} is the campaign base sha (`--ref-base`; equal to {base} when not given; both are HEAD in
+the self-test).
 Every touched path (base or head side) must be in scope. Patterns are fnmatch with '*' matching
 '/', and "/**/" also matching a single "/" (one matcher for scope, frozen and forbid).
 
@@ -88,6 +90,19 @@ against HEAD. It passes (exit 0) only if every reference tier detects the mutati
 shows the tiers exercise the checkout under test and not some installed copy. Before mutating,
 every behaviour tier (reference and command tiers not marked `behaviour = false`) must pass on
 the unmutated HEAD, else the self-test fails with "tier <name> fails without mutation".
+`--mutate path:line:N` picks the N-th (1-based, column order) numeric literal on that line.
+Each self-test check records `outcome` (detected | missed | error), `exit_code` (mutated run),
+`baseline_exit_code` (unmutated run) and the mutated run's `detail`. A command tier detects the
+mutation by exiting nonzero; with `detect_exit = [1, 5]` (nonzero ints) only those codes count and
+any other nonzero code is an `error` (not detected). A reference tier detects by output difference,
+but a head exit code outside a configured `detect_exit` is an `error`. In normal gate steps
+`detect_exit` is ignored (any nonzero exit fails).
+
+`codehealth gate --require-gain` adds a static check `gain` that passes only if the debt over the
+touched in-scope files dropped (a failure skips the tiers). The gate JSON `meta` records
+`debt_before`, `debt_after`, `require_gain`, `trial` and `head_tree` (git tree sha of the worktree
+state that was judged, computed with a temporary index). Check JSON carries `exit_code` (command
+tiers: rc; reference tiers: rc of the head run).
 """
 from __future__ import annotations
 
@@ -118,6 +133,9 @@ class Check:
     ok: bool
     detail: str = ""
     seconds: float = 0.0
+    exit_code: int | None = None            # command tiers: rc; reference tiers: rc of the head run
+    outcome: str | None = None              # self-test only: detected | missed | error
+    baseline_exit_code: int | None = None   # self-test only: rc of the same tier on unmutated HEAD
 
 
 def _match(path: str, patterns) -> bool:
@@ -427,7 +445,7 @@ def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
     Cached under <git-common-dir>/codehealth/cache/<sha>/<tier>/ with a manifest holding the
     command, outputs and env, and the result of the determinism check (two runs, at caching time)."""
     names, timeout = list(t["outputs"]), t.get("timeout")
-    cmd = _fill(t["cmd"], repo="<repo>", base=ctx.ref_base, files=ctx.files, out="<out>")
+    cmd = _fill(t["cmd"], repo="<repo>", base=ctx.ref_base, ref_base=ctx.ref_base, files=ctx.files, out="<out>")
     key = {"cmd": cmd, "outputs": names, "env": ctx.env}
     cdir = _cache_dir(ctx.repo, ctx.ref_base, t["name"])
     try:
@@ -444,7 +462,8 @@ def _base_outputs(t, ctx: Ctx, get_tree) -> tuple[dict | None, str, list]:
     for _ in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
         try:
-            rc, _ = _run(_fill(t["cmd"], repo=str(tree), base=ctx.ref_base, files=ctx.files, out=str(out)),
+            rc, _ = _run(_fill(t["cmd"], repo=str(tree), base=ctx.ref_base, ref_base=ctx.ref_base,
+                                files=ctx.files, out=str(out)),
                          tree, ctx.env, ctx.log, timeout)
             if rc != 0:
                 return None, f"exit {rc} at base", []
@@ -545,40 +564,42 @@ def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout) -> tuple[int, dic
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
+def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str, int | None]:
+    """(ok, detail, exit code of the head run or None if it did not get that far)."""
     names, timeout = t["outputs"], t.get("timeout")
     b, err, nondet = _base_outputs(t, ctx, get_tree)
     if err:
-        return False, err
+        return False, err, None
     if nondet:
-        return False, "not deterministic at base: " + ", ".join(nondet)
+        return False, "not deterministic at base: " + ", ".join(nondet), None
     runs, executed = [], None
     for i in range(2):
         out = Path(tempfile.mkdtemp(prefix=f"codehealth-{t['name']}-"))
-        cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.ref_base, files=ctx.files, out=str(out))
+        cmd = _fill(t["cmd"], repo=str(ctx.repo), base=ctx.ref_base, ref_base=ctx.ref_base,
+                    files=ctx.files, out=str(out))
         try:
             if i == 0 and t.get("coverage", False):
                 rc, executed = _run_covered(cmd, ctx.repo, ctx.env, ctx.log, timeout)
             else:
                 rc, _ = _run(cmd, ctx.repo, ctx.env, ctx.log, timeout)
             if rc != 0:
-                return False, f"exit {rc} at head"
+                return False, f"exit {rc} at head", rc
             runs.append(_outputs(out, names))
         finally:
             shutil.rmtree(out, ignore_errors=True)
     h, h2 = runs
     missing = [n for n in names if h[n] is None]
     if missing:
-        return False, "missing output: " + ", ".join(missing)
+        return False, "missing output: " + ", ".join(missing), 0
     nondet = [n for n in names if h[n] != h2[n]]
     if nondet:
-        return False, "not deterministic at head: " + ", ".join(nondet)
+        return False, "not deterministic at head: " + ", ".join(nondet), 0
     if t.get("coverage", False):
         if not executed:
-            return False, "no coverage data (is coverage installed in the command's interpreter?)"
+            return False, "no coverage data (is coverage installed in the command's interpreter?)", 0
         bad = unexecuted_changes(ctx, executed)
         if bad:
-            return False, "reference does not execute: " + ", ".join(bad)
+            return False, "reference does not execute: " + ", ".join(bad), 0
     # Refactor mode is always bitwise; optimize mode uses the human-declared tolerance.
     tol = t.get("tolerance") if ctx.mode == "optimize" else None
     ok, details = True, []
@@ -587,7 +608,7 @@ def _reference(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
         ok &= good
         if detail != "bitwise equal":
             details.append(f"{n}: {detail}")
-    return ok, "; ".join(details) or "bitwise equal"
+    return ok, "; ".join(details) or "bitwise equal", 0
 
 
 def _status(cwd: Path) -> bytes:
@@ -600,7 +621,7 @@ def _bench_run(t, cwd, base, files, env, log) -> tuple[int, float, float, str]:
     try:
         before = _status(cwd)
         r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
-        rc, sec = _run(_fill(t["cmd"], repo=str(cwd), base=base, files=files, out=""), cwd,
+        rc, sec = _run(_fill(t["cmd"], repo=str(cwd), base=base, ref_base=base, files=files, out=""), cwd,
                        {**env, "TMPDIR": tmp, "XDG_CACHE_HOME": cache}, log, t.get("timeout"))
         r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu = (r1.ru_utime + r1.ru_stime) - (r0.ru_utime + r0.ru_stime)
@@ -714,41 +735,47 @@ def run_tiers(repo: Path, base: str, cfg: config.Config, changes, cadence: str, 
         if (kinds and kind not in kinds) or (only is not None and name not in only):
             continue
         if kind == "command":
-            rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, files=files, out=""),
+            rc, _ = _run(_fill(t["cmd"], repo=str(repo), base=base, ref_base=ctx.ref_base,
+                               files=files, out=""),
                          repo, env, log, t.get("timeout"))
-            ok, detail = rc == 0, (f"exit {rc}" if rc else "")
-        elif kind in ("reference", "benchmark"):
-            fn = _reference if kind == "reference" else _benchmark
-            ok, detail = fn(t, ctx, get_tree)
+            ok, detail, exit_code = rc == 0, (f"exit {rc}" if rc else ""), rc
+        elif kind == "reference":
+            ok, detail, exit_code = _reference(t, ctx, get_tree)
+        elif kind == "benchmark":
+            ok, detail = _benchmark(t, ctx, get_tree)
+            exit_code = None
         else:
             raise ValueError(f"tier {name}: unknown kind {kind!r}")
-        checks.append(Check(name, ok, detail, time.monotonic() - t0))
+        checks.append(Check(name, ok, detail, time.monotonic() - t0, exit_code))
         log.write(f"--- tier {name}: {'PASS' if ok else 'FAIL'} {detail}\n")
         if not ok and not keep_going:
             break
     return checks
 
 
-def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> Check:
-    """Debt over the touched in-scope files must not rise (both modes)."""
+def debt_check(repo: Path, base: str, cfg: config.Config, changes) -> tuple[Check, float, float]:
+    """Debt over the touched in-scope files must not rise (both modes): (check, before, after)."""
     from .cli import analyze_ref  # noqa: PLC0415 (cli imports this module)
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
     db = sum(r["debt"] for r in analyze_ref(repo, base, cfg, bp).values())
     dh = sum(r["debt"] for r in analyze_ref(repo, None, cfg, hp).values())
-    return Check("debt", dh <= db + 1e-9, f"{db:.1f} -> {dh:.1f}")
+    return Check("debt", dh <= db + 1e-9, f"{db:.1f} -> {dh:.1f}"), db, dh
 
 
 def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
          config_override: Path | None = None, mode: str = "refactor",
-         ref_base: str | None = None) -> tuple[list[Check], str, str]:
+         ref_base: str | None = None, require_gain: bool = False,
+         info: dict | None = None) -> tuple[list[Check], str, str]:
     """config_override is for local trials only; CI must use the base's committed config.
 
     mode "refactor": references bitwise, benchmark may not slow down beyond max_slowdown.
     mode "optimize": references within each tier's declared `tolerance`, the primary benchmark
     must reach min_speedup. Debt may not rise in either mode. Returns (checks, base, ref_base).
     Static checks and debt use `base` (last accepted step); reference and benchmark tiers compare
-    head with `ref_base` (campaign base; default: the same as base).
+    head with `ref_base` (campaign base; default: the same as base). With `require_gain` a static
+    check `gain` fails unless debt over the touched files dropped. `info`, if given, receives
+    debt_before and debt_after (rounded to 2 decimals).
     """
     if mode not in ("refactor", "optimize"):
         raise ValueError(f"unknown mode {mode!r}")
@@ -757,9 +784,16 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     cfg = (config.parse(config_override.read_text(), f"override:{config_override}")
            if config_override else config.load(repo, base))
     changes = gitio.changes(repo, base, None)
+    debt, db, dh = debt_check(repo, base, cfg, changes)
+    if info is not None:
+        info.update(debt_before=round(db, 2), debt_after=round(dh, 2))
     checks = (config_checks(cfg, changes, cadence, mode) + static_checks(repo, base, cfg, changes,
                                                                   trial=config_override is not None)
-              + [debt_check(repo, base, cfg, changes)])
+              + [debt])
+    if require_gain:
+        gained = dh < db - 1e-9
+        checks.append(Check("gain", gained, f"{db:.1f} -> {dh:.1f}" if gained
+                            else f"no debt reduction: {db:.1f} -> {dh:.1f}"))
     if all(c.ok for c in checks):
         with open(log_path, "w") as log:
             checks += run_tiers(repo, base, cfg, changes, cadence, log, mode, ref_base=ref_sha)
@@ -785,19 +819,43 @@ def _literal_sites(source: str, line: int | None = None) -> list[tuple[int, int,
     return [s for s in out if s[3] not in (0, 1)]
 
 
-def mutate_source(source: str, site) -> tuple[str, str]:
+def mutate_source(source: str, site, nth: tuple[int, int] | None = None) -> tuple[str, str]:
     lineno, col, end, v = site
     new = repr(v + 1) if isinstance(v, int) else repr(v * 1.5 + 1.0)
     lines = source.split("\n")
     raw = lines[lineno - 1].encode()
     lines[lineno - 1] = (raw[:col] + new.encode() + raw[end:]).decode()
-    return "\n".join(lines), f"line {lineno}: {v!r} -> {new}"
+    where = f"line {lineno} col {col + 1}" + (f" (literal {nth[0]} of {nth[1]})" if nth else "")
+    return "\n".join(lines), f"{where}: {v!r} -> {new}"
+
+
+def parse_mutate(spec: str) -> tuple[str, int, int]:
+    """path:line or path:line:N (N = 1-based literal index on that line), parsed from the right."""
+    parts = spec.split(":")
+    if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit() and ":".join(parts[:-2]):
+        return ":".join(parts[:-2]), int(parts[-2]), int(parts[-1])
+    if len(parts) >= 2 and parts[-1].isdigit() and ":".join(parts[:-1]):
+        return ":".join(parts[:-1]), int(parts[-1]), 1
+    raise ValueError(f"--mutate expects path:line or path:line:N, got {spec!r}")
 
 
 def self_test_kind(cfg: config.Config) -> str:
     """What the self-test counts: reference tiers if there are any, else behaviour command tiers."""
     tiers = _selected(cfg, "campaign", "refactor")
     return "reference" if any(t.get("kind") == "reference" for t in tiers) else "behaviour command"
+
+
+def _self_test_result(c: Check, t: dict, baseline_rc: int | None) -> Check:
+    """Classify a mutated run of tier t: detected, missed, or error (exit code outside detect_exit)."""
+    allowed = t.get("detect_exit")
+    rc = c.exit_code
+    if c.ok:
+        outcome, detail = "missed", c.detail
+    elif allowed and rc not in (None, 0) and rc not in allowed:
+        outcome, detail = "error", f"exit {rc} not in detect_exit {list(allowed)}"
+    else:
+        outcome, detail = "detected", c.detail
+    return Check(c.name, outcome == "detected", detail, c.seconds, rc, outcome, baseline_rc)
 
 
 def self_test(repo: Path, cfg: config.Config, log_path: Path,
@@ -812,12 +870,10 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
     gitio.git(repo, "worktree", "add", "--detach", "-f", str(tree), head)
     try:
         if mutate:
-            path, _, line = mutate.rpartition(":")
-            if not path or not line.isdigit():
-                raise ValueError(f"--mutate expects path:line, got {mutate!r}")
+            path, line, nth = parse_mutate(mutate)
             candidates = [path]
         else:
-            path, line = None, None
+            path, line, nth = None, None, None
             candidates = sorted(p for p in gitio.ls_files(repo, head) if cfg.in_scope(p))
         # Baseline: every behaviour tier must pass on the unmutated HEAD, else "detected" is vacuous.
         beh = {t["name"] for t in _selected(cfg, "campaign", "refactor")
@@ -828,19 +884,24 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
         broken = [c for c in base_checks if not c.ok]
         if broken:
             return False, [Check(c.name, False, f"tier {c.name} fails without mutation"
-                                 + (f" ({c.detail})" if c.detail else ""), c.seconds)
+                                 + (f" ({c.detail})" if c.detail else ""), c.seconds,
+                                 outcome="error", baseline_exit_code=c.exit_code)
                            for c in broken], "none (baseline failed)"
         gitio.git(tree, "clean", "-fdxq")   # drop stale bytecode: a same-size mutation keeps mtime and size
         target = None
         for p in candidates:
-            sites = _literal_sites((tree / p).read_text(), int(line) if mutate else None)
+            sites = _literal_sites((tree / p).read_text(), line)
+            if mutate and not 1 <= nth <= len(sites):
+                listing = ", ".join(f"{i} = {s[3]!r} at col {s[1] + 1}" for i, s in enumerate(sites, 1))
+                raise ValueError(f"--mutate {mutate}: literal {nth} not found on line {line} of {p} "
+                                 + (f"(literals: {listing})" if sites else "(no numeric literal on that line)"))
             if sites:
-                target = (p, sites[0])
+                target = (p, sites[nth - 1 if mutate else 0], (nth, len(sites)) if mutate else None)
                 break
         if target is None:
             raise RuntimeError("self-test: no numeric literal found to mutate")
-        p, site = target
-        text, what = mutate_source((tree / p).read_text(), site)
+        p, site, which = target
+        text, what = mutate_source((tree / p).read_text(), site, which)
         (tree / p).write_text(text)
         what = f"{p} {what}"
         changes = gitio.changes(tree, head, None)
@@ -848,23 +909,21 @@ def self_test(repo: Path, cfg: config.Config, log_path: Path,
             checks = run_tiers(tree, head, cfg, changes, "campaign", log, "refactor",
                                keep_going=True, kinds=("reference", "command"))
         tiers = _selected(cfg, "campaign", "refactor")
+        by_name = {t["name"]: t for t in tiers}
+        base_rc = {c.name: c.exit_code for c in base_checks}
         refs = {t["name"] for t in tiers if t.get("kind") == "reference"}
+        beh = {t["name"] for t in tiers if t.get("kind", "command") == "command"
+               and t.get("behaviour", True)}
+        # Every reference tier must detect the mutation; without reference tiers, at least one
+        # behaviour command tier must (tiers marked `behaviour = false`, lint and format, do not count).
+        counted = refs or beh
+        out = [_self_test_result(c, by_name[c.name], base_rc.get(c.name)) for c in checks if c.name in counted]
         if refs:
-            # Every reference tier must detect the mutation.
-            missed = [c for c in checks if c.name in refs and c.ok]
-            ok = not missed and len([c for c in checks if c.name in refs]) == len(refs)
-            out = [Check(c.name, not c.ok, c.detail or "detected" if not c.ok else "missed", c.seconds)
-                   for c in checks if c.name in refs]
+            ok = all(c.ok for c in out) and len(out) == len(refs)
         else:
-            # No reference tier: at least one behaviour command tier must detect it.
-            # Tiers marked `behaviour = false` (lint, format) do not count.
-            beh = {t["name"] for t in tiers if t.get("kind", "command") == "command"
-                   and t.get("behaviour", True)}
-            out = [Check(c.name, not c.ok, "detected" if not c.ok else "missed", c.seconds)
-                   for c in checks if c.name in beh]
             ok = any(c.ok for c in out)
             if not beh:
-                out.append(Check("self-test", False, "no reference or behaviour command tier"))
+                out.append(Check("self-test", False, "no reference or behaviour command tier", outcome="error"))
         return ok, out, what
     finally:
         _remove_tree(repo, tree)
