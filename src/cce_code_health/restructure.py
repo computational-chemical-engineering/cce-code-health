@@ -20,6 +20,7 @@ import tomllib
 from pathlib import Path
 
 from . import config, gitio
+from .architecture import module_name
 
 PLAN_DIR = ".codehealth/restructure/"
 PLAN_KEYS = {"id", "approved_by", "reason", "new_files", "new_public"}
@@ -67,15 +68,9 @@ def plan_problems(plan: dict, changes) -> list[str]:
             if not any(config.match(p, g) for g in plan["new_files"])]
 
 
-def _module_suffix(path: str) -> str:
-    p = path[:-3] if path.endswith(".py") else path
-    if p.endswith("/__init__"):
-        p = p[:-len("/__init__")]
-    return p.replace("/", ".")
-
-
-def _import_source(node: ast.ImportFrom, path: str, candidates: list[str]) -> str | None:
-    """The candidate file an ImportFrom in `path` refers to, if any."""
+def _import_source(node: ast.ImportFrom, path: str, candidates: list[str], roots) -> str | None:
+    """The candidate file an ImportFrom in `path` refers to, if any. Absolute imports resolve
+    exactly through the import roots (architecture.module_name)."""
     if node.level:
         parts = path.split("/")[:-1]
         if node.level - 1 > len(parts):
@@ -86,47 +81,102 @@ def _import_source(node: ast.ImportFrom, path: str, candidates: list[str]) -> st
             if c in (stem + ".py", stem + "/__init__.py"):
                 return c
         return None
-    mod = node.module or ""
     for c in candidates:
-        s = _module_suffix(c)
-        if s == mod or s.endswith("." + mod):
+        m = module_name(c, roots)
+        if m and m[0] == node.module:
             return c
     return None
 
 
-def _reexports(source: str, path: str, candidates: list[str]) -> dict[str, str]:
-    """Top-level `from X import N` (unaliased, or aliased to the same name) in source: N -> file."""
+def _binders(stmt) -> tuple[set[str], bool]:
+    """(names a top-level statement binds or deletes in module scope, star import?).
+    Nested function, class and lambda bodies are separate scopes and are not entered;
+    comprehension targets are local in Python 3 and skipped likewise."""
+    if isinstance(stmt, ast.Import):
+        return {(a.asname or a.name).split(".")[0] for a in stmt.names}, False
+    if isinstance(stmt, ast.ImportFrom):
+        names = {a.asname or a.name for a in stmt.names}
+        return names - {"*"}, "*" in names
+    names, star, stack = set(), False, [stmt]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            stack += node.decorator_list + ([] if isinstance(node, ast.ClassDef) else
+                                            node.args.defaults + node.args.kw_defaults)
+            continue
+        if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            continue
+        if node is not stmt and isinstance(node, (ast.Import, ast.ImportFrom)):
+            sub, s = _binders(node)
+            names |= sub
+            star |= s
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        stack.extend(ast.iter_child_nodes(node))
+    return names, star
+
+
+def _reexports(source: str, path: str, candidates: list[str], roots) -> dict[str, str]:
+    """Names N whose LAST top-level binder in source is an unaliased (or same-name aliased)
+    `from <candidate> import N`: N -> candidate file. A later def, class, assignment, import,
+    star import or `global N` anywhere in the module disqualifies N."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return {}
-    out = {}
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom):
-            src = _import_source(node, path, candidates)
+    out: dict[str, str] = {}
+    globals_ = {n for node in ast.walk(tree) if isinstance(node, ast.Global) for n in node.names}
+    for stmt in tree.body:
+        names, star = _binders(stmt)
+        if star:
+            out.clear()
+        for n in names:
+            out.pop(n, None)
+        if isinstance(stmt, ast.ImportFrom):
+            src = _import_source(stmt, path, candidates, roots)
             if src:
-                out.update({a.name: src for a in node.names if a.asname in (None, a.name)})
-    return out
+                out.update({a.name: src for a in stmt.names if a.asname in (None, a.name)})
+    return {n: src for n, src in out.items() if n not in globals_}
 
 
-def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> list[str]:
+def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api, roots=(".",)) -> list[str]:
     """Restructure public-API rule over the touched in-scope (base path, head path) pairs.
 
-    No public name may disappear from any module. A name of an old module may turn from a
-    definition into a re-export (`from <new> import Name`) only when <new> is an added file
-    matching new_files whose own API has the identical entry (signature, decorators, bases,
-    fields: whatever `_public_api` compares); for a class, its members move with it. Public
-    names in added files or new in old modules must be listed in new_public (a listed name
-    covers its class members; `__all__` of a new file is exempt), and every listed name must
-    exist at head."""
+    No public name may disappear from any module. A name N of an old module may turn from a
+    definition into a re-export only when the last top-level binder of N in the old module is
+    `from <new> import N`, <new> is an added file matching new_files (absolute imports resolve
+    through `roots`), and <new>'s entries {N, N.*} equal the old module's base entries {N, N.*}
+    exactly (signature, decorators, bases, fields: whatever `_public_api` compares). A member
+    added to a re-exported class needs its own `path:N.member` entry in new_public. Other public
+    names in added files or new in old modules must be listed in new_public (a listed name covers
+    its class members; `__all__` of a new file is exempt), and every listed name must exist at
+    head."""
     planned = [hp for hp in added_paths([(None, bp, hp) for bp, hp in py])
                if hp in th and any(config.match(hp, g) for g in plan["new_files"])]
     apis = {hp: public_api(th[hp], hp) for hp in planned}
     listed = set(plan["new_public"])
     problems = []
+    pinned: dict[str, dict[str, set]] = {}   # planned file -> re-exported N -> base {N, N.*}
+    moves = {}
+    for bp, hp in py:
+        if bp and bp == hp and bp in tb and hp in th:
+            ab = public_api(tb[bp], bp)
+            moves[hp] = _reexports(th[hp], hp, planned, roots) if ab else {}
+            for n, src in moves[hp].items():
+                pinned.setdefault(src, {}).setdefault(n, set()).update(
+                    k for k in ab if k.split(".")[0] == n)
 
     def allowed(path, name):
-        return f"{path}:{name}" in listed or f"{path}:{name.split('.')[0]}" in listed
+        top = name.split(".")[0]
+        if name != top and top in pinned.get(path, {}):   # a moved member, or listed exactly
+            return name in pinned[path][top] or f"{path}:{name}" in listed
+        return f"{path}:{name}" in listed or f"{path}:{top}" in listed
 
     for bp, hp in py:
         ab = public_api(tb[bp], bp) if bp in tb else {}
@@ -139,11 +189,13 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> list[
         if bp and bp != hp and ab:
             problems.append(f"{bp}: module moved to {hp} (old import paths must keep working)")
             continue
-        moved = _reexports(th[hp], hp, planned) if ab and hp in th else {}
+        moved = moves.get(hp, {})
         for name, s in ab.items():
             if ah.get(name) == s:
                 continue
             src = moved.get(name.split(".")[0])
+            if src and ah.get(name, "re-export") != "re-export":
+                src = None
             if src and apis[src].get(name) == s:
                 continue
             if src:
@@ -153,8 +205,15 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> list[
                 problems.append(f"{where}: {name}{s} -> {ah[name]}")
             else:
                 problems.append(f"{where}: {name} removed")
-        problems += [f"{where}: {n} added (not in the plan's new_public)" for n in ah
-                     if n not in ab and not allowed(where, n) and not (bp is None and n == "__all__")]
+        for n in ah:
+            if n in ab or allowed(where, n) or (bp is None and n == "__all__"):
+                continue
+            top = n.split(".")[0]
+            if n != top and top in pinned.get(where, {}):
+                problems.append(f"{where}: {n} added to re-exported {top} (not in the plan's new_public; "
+                                f"list {where}:{n})")
+            else:
+                problems.append(f"{where}: {n} added (not in the plan's new_public)")
     for entry in sorted(listed):
         path, name = entry.split(":")
         if name not in (public_api(th[path], path) if path in th else {}):

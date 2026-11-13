@@ -324,7 +324,8 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
         checks.append(Check("literals", not gone and not new, detail[:400]))
     if g.get("public_api", False) and plan is not None:
-        problems = restructure.public_api_problems(plan, py, tb, th, _public_api)
+        problems = restructure.public_api_problems(plan, py, tb, th, _public_api,
+                                                     (cfg.architecture or {}).get("roots", ["."]))
         checks.append(Check("public_api", not problems, "; ".join(problems[:5])))
     elif g.get("public_api", False):
         problems = []

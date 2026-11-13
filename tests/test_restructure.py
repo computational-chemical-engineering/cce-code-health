@@ -117,3 +117,40 @@ def test_plan_changed_in_step_is_forbidden(repo, capsys):
     (repo / PLAN_PATH).write_text(PLAN.replace('new_files = ["pkg/calc_impl.py"]', 'new_files = ["pkg/*"]'))
     assert gate(repo) == 1
     assert "FAIL forbid" in capsys.readouterr().out
+
+
+def test_reexport_rebound_by_later_def_fails(repo, capsys):
+    move(repo, old=OLD + '\n\ndef calc(x, scale=3):\n    return x * scale + 1\n')
+    assert gate(repo) == 1
+    assert "pkg/mod.py: calc(x) -> (x, scale=3)" in capsys.readouterr().out
+
+
+def test_reexport_rebound_by_later_import_fails(repo, capsys):
+    move(repo, old=OLD + "from os.path import join as calc\n")
+    assert gate(repo) == 1
+    assert "pkg/mod.py: calc removed" in capsys.readouterr().out
+
+
+def test_reexport_matched_by_module_suffix_fails(repo, capsys):
+    move(repo, old=OLD.replace("from pkg.calc_impl", "from calc_impl"))
+    assert gate(repo) == 1
+    assert "pkg/mod.py: calc removed" in capsys.readouterr().out
+
+
+CLS_BASE = ('LABEL = "calc"\n\n\nclass Calc:\n    def run(self, x):\n        return x * 3 + 1\n\n\n'
+            'def calc(x):\n    return Calc().run(x)\n')
+CLS_IMPL = ('class Calc:\n    def run(self, x):\n        return x * 3 + 1\n\n'
+            '    def extra(self, y):\n        return y\n')
+CLS_OLD = 'from pkg.calc_impl import Calc\n\nLABEL = "calc"\n\n\ndef calc(x):\n    return Calc().run(x)\n'
+CLS_PLAN = ('id = "c"\napproved_by = "r"\nreason = "move Calc"\nnew_files = ["pkg/calc_impl.py"]\n'
+            'new_public = ["pkg/calc_impl.py:Calc"{}]\n')
+
+
+@pytest.mark.parametrize("extra, rc", [("", 1), (', "pkg/calc_impl.py:Calc.extra"', 0)])
+def test_moved_class_gains_member_only_when_listed(repo, capsys, extra, rc):
+    plan = ".codehealth/restructure/c.toml"
+    commit(repo, {"pkg/mod.py": CLS_BASE, plan: CLS_PLAN.format(extra)})
+    move(repo, impl=CLS_IMPL, old=CLS_OLD)
+    assert gate(repo, plan=plan) == rc
+    out = capsys.readouterr().out
+    assert ("Calc.extra added to re-exported Calc" in out) == (rc == 1)
