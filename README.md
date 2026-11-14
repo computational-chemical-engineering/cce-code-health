@@ -182,7 +182,8 @@ codehealth log --gate-json g.json --campaign c1 --target src/a.py::f --recipe ex
 
 `codehealth log` appends one validated JSON line to `<git-common-dir>/codehealth/runs/<campaign>.jsonl`
 (`--out` overrides). The result is inferred (gate-fail, accepted, no-gain; in optimize mode all checks
-ok means accepted) or given with `--result` (also review-reject, which needs `--reason`); an accepted
+ok means accepted) or given with `--result` (also review-reject, which needs `--reason`; a gate-fail
+may carry an optional `--reason`, e.g. a review-note step refused on scope or frozen); an accepted
 step must be committed first (HEAD's tree must equal the gate's `head_tree`; `--head SHA` names an
 earlier commit on the branch instead, for logging after a later docs commit). `--result
 accepted-neutral --reason <why>` records a kept refactor or restructure step without debt gain (for

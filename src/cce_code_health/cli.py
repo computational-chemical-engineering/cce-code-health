@@ -364,8 +364,6 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
     else:
         if a.result in ("review-reject", "accepted-neutral") and not a.reason:
             raise ValueError(f"--result {a.result} needs --reason")
-        if a.reason and a.result not in ("review-reject", "accepted-neutral"):
-            raise ValueError("--reason is only for --result review-reject or accepted-neutral")
     checks = data["checks"]
     failed = [c for c in checks if not c["ok"]]
     gained = meta_["mode"] == "optimize" or meta_["debt_after"] < meta_["debt_before"] - EPS
@@ -373,6 +371,8 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
         result = a.result or ("gate-fail" if failed else "review-reject")
     else:
         result = a.result or _infer_result(checks, meta_["mode"], meta_["debt_before"], meta_["debt_after"])
+    if not reverting and a.reason and result not in ("review-reject", "accepted-neutral", "gate-fail"):
+        raise ValueError(f"--reason is only for review-reject, accepted-neutral or gate-fail (result: {result})")
     if result == "gate-fail" and not failed:
         raise ValueError("--result gate-fail but every check in the gate JSON passed")
     if result != "gate-fail" and failed:

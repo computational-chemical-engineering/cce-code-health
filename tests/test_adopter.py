@@ -314,3 +314,22 @@ def test_target_debt_matching():
     assert flat["relocated"] is None
     amb = {"before": {"p.py::A.run": 1.0, "p.py::B.run": 1.0}, "after": {}}
     assert target_debt("p.py::run", amb) == {"ambiguous": ["p.py::A.run", "p.py::B.run"]}
+
+
+def test_log_reason_on_gate_fail(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(10))
+    rc, d = gjson(drepo)
+    assert rc == 1
+    assert log(drepo, "g.json", "--reason", "review note touched a frozen file") == 0
+    rec = json.loads((drepo / ".git/codehealth/runs/c1.jsonl").read_text())
+    assert rec["result"] == "gate-fail" and rec["reason"] == "review note touched a frozen file"
+
+
+def test_log_reason_refused_for_inferred_accept(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(8))
+    rc, d = gjson(drepo)
+    assert rc == 0
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    assert log(drepo, "g.json", "--reason", "x") == 2
+    assert "--reason is only for" in capsys.readouterr().err
