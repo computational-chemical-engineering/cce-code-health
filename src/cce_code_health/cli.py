@@ -190,6 +190,17 @@ def cmd_diff(a) -> int:
         rows += [f"  review {d} (changes with {f} in {n} commits, degree {g}; {f} changed here)"
                  for d, f, n, g in co[:10]]
         doc_res.notes.extend(f"co-change review: {d} with {f} ({n} shared, degree {g})" for d, f, n, g in co)
+        from . import agent_docs  # noqa: PLC0415
+        ren = {hp: bp for _, bp, hp in gitio.changes(repo, base, head) if bp and hp and bp != hp}
+        over, dup = agent_docs.compare(agent_texts(repo, base, cfg.docs), agent_texts(repo, head, cfg.docs),
+                                       ren, cfg.docs)
+        if cfg.docs.get("agent_budget", "warn") == "fail":
+            failures += over
+        else:
+            doc_res.warnings.extend(over)
+            rows += [f"  WARNING {w}" for w in over]
+        doc_res.warnings.extend(dup)
+        rows += [f"  WARNING {w}" for w in dup]
     ds = docstrings.compare_refs(repo, base, head, cfg, gitio.changes(repo, base, head))
     failures += ds or []
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
@@ -260,6 +271,32 @@ def cmd_docs_stale(a, repo: Path, cfg) -> int:
     return 0
 
 
+def agent_texts(repo: Path, ref: str | None, d: dict) -> dict[str, str]:
+    from . import agent_docs  # noqa: PLC0415
+    return gitio.read_files(repo, ref, [p for p in gitio.ls_files(repo, ref) if agent_docs.is_agent(p, d)])
+
+
+def cmd_docs_agent(a, repo: Path, ref: str | None, cfg) -> int:
+    from . import agent_docs, docs as docsmod  # noqa: PLC0415
+    if not cfg.docs:
+        raise ValueError(f"{cfg.source}: no [docs] table")
+    probs = docsmod.check_config(cfg.docs)
+    if probs:
+        raise ValueError(f"{cfg.source}: " + "; ".join(probs))
+    rep = agent_docs.report(agent_texts(repo, ref, cfg.docs), cfg.docs)
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), **rep})
+    print(f"{'agent doc':60} {'words':>6} {'lines':>6} {'over':>6}")
+    for x in rep["docs"][:a.top]:
+        print(f"{x['path'][-60:]:60} {x['words']:6} {x['lines']:6} {x['over'] or '':>6}")
+    for x in rep["duplicates"][:10]:
+        print(f"  repeated ({x['words']} words) in {', '.join(x['docs'])}: \"{x['start'][:60]}...\"")
+    n_over = sum(1 for x in rep["docs"] if x["over"])
+    print(f"DOCS-AGENT {repo.name}@{(ref or 'worktree')[:10]}: {len(rep['docs'])} agent docs, "
+          f"{rep['total_words']} words, {n_over} over the budget of {rep['budget']}, "
+          f"{len(rep['duplicates'])} repeated paragraph(s)")
+    return 0
+
+
 def cmd_docs(a) -> int:
     from . import docs as docsmod  # noqa: PLC0415
     repo = Path(a.repo).resolve()
@@ -269,6 +306,8 @@ def cmd_docs(a) -> int:
         if ref:
             raise ValueError("--stale works on the working tree and full history (no --ref)")
         return cmd_docs_stale(a, repo, cfg)
+    if a.agent:
+        return cmd_docs_agent(a, repo, ref, cfg)
     res = docsmod.analyse(repo, ref, cfg)
     if res is None:
         raise ValueError(f"{cfg.source}: no [docs] table")
@@ -648,6 +687,8 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--stale", action="store_true",
                     help="rank living docs by commits to their referenced and co-changing files since the "
                          "doc's last change")
+    pd.add_argument("--agent", action="store_true",
+                    help="agent docs (CLAUDE.md, .claude/...): words per doc against the budget, repeated paragraphs")
     pd.add_argument("--min-shared", type=int, default=3, help="--stale co-change: min shared commits (default 3)")
     pd.add_argument("--min-degree", type=float, default=0.5, help="--stale co-change: min degree (default 0.5)")
     pd.add_argument("--config", dest="trial_config",

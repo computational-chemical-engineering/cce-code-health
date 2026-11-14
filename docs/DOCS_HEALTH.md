@@ -138,6 +138,12 @@ data files since the doc's last commit, plus unreferenced co-change partners cha
 `diff` adds co-change review rows. Doc-to-doc references are not counted (a spec pointing at a
 busy state file is not stale code-wise; the first trial on OpenFlowsheet was dominated by them).
 
+## 6. Agent-doc budget (built 2026-11-14)
+
+`codehealth docs --agent` (agent_docs.py): words per agent doc against `agent_words`, repeated
+40+ word paragraphs across agent docs; a ratchet in `diff` (warn by default). OpenFlowsheet: 9 docs,
+6,930 words, 3 repeated paragraphs.
+
 ## Later
 
 A docs-sync review lane fed by "docs to review", size

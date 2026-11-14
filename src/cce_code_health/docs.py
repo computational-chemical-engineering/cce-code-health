@@ -43,7 +43,8 @@ from pathlib import Path
 
 from . import config, gitio
 
-DOCS_KEYS = {"include", "exclude", "records", "python_roots", "anchors", "new", "docstrings"}
+DOCS_KEYS = {"include", "exclude", "records", "python_roots", "anchors", "new", "docstrings",
+             "agent", "agent_words", "agent_budget"}
 EXTS = {".py", ".md", ".toml", ".cpp", ".hpp", ".h", ".cc", ".cu", ".cuh", ".yml", ".yaml", ".json",
         ".sh", ".ipynb", ".cmake", ".txt", ".cfg", ".ini", ".rst", ".svg", ".html", ".lock", ".csv",
         ".jsonl", ".qmd", ".tex", ".bib", ".in", ".pyi", ".c", ".f90", ".js", ".ts", ".css"}
@@ -78,7 +79,8 @@ def check_config(d: dict) -> list[str]:
         probs.append("[docs] docstrings must be true or false")
     if not d.get("include"):
         probs.append("[docs] include is required (globs of Markdown files and notebooks)")
-    return probs
+    from .agent_docs import check as agent_check  # noqa: PLC0415
+    return probs + agent_check(d)
 
 
 def _matches(path: str, pats: list[str]) -> bool:

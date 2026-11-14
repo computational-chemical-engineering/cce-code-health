@@ -425,7 +425,16 @@ as new for D1: document it in the same step.
 ```bash
 codehealth docs --stats            # references per docs class, kind, status and reason
 codehealth docs --stale            # living docs whose referenced or co-changing code moved on
+codehealth docs --agent            # agent docs: words per doc against the budget, repeated paragraphs
 ```
+
+`docs --agent` measures agent docs, which a model loads into its context (`[docs] agent`, default
+CLAUDE.md, AGENTS.md, `.claude/**/*.md` and `**/SKILL.md` at any depth), against `agent_words`
+(default 2500 words per doc) and lists paragraphs of 40+ words repeated across them. In
+`codehealth diff` it is a ratchet like debt: a doc over the budget may not grow, one under it may
+not cross it, a new one must fit (`agent_budget = "warn"`, the default, or `"fail"`), and a newly
+repeated paragraph warns. OpenFlowsheet: 9 agent docs, 6,930 words, none over budget, 3 repeated
+paragraphs (a token-economy block copied into 5 agent definitions).
 
 `docs --stale` ranks living docs (records excluded) by the commits that changed their
 referenced code and data files after the doc's own last commit (paths, anchors, test ids, and
