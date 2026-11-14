@@ -131,8 +131,10 @@ instead.
 
 ## Playbook consolidation (every ~10 attempts)
 
-Compute per recipe: attempts, accepts (`accepted` only), gate-fails, review-rejects, median debt reduction,
-from the run logs with a short script (never from memory). Update `.codehealth/playbook.md`:
+Run `codehealth stats` (never from memory): per recipe tries, accepts (`accepted` only, minus
+steps later reverted), accepted-neutral, no-gain, gate-fails by tier, review-rejects, rate, files,
+median debt drop, median relocated share, and hints (promote, retire?, add when-not, mostly
+relocates). It reads the live log and `.codehealth/runs/`; `--campaign` narrows it. Update `.codehealth/playbook.md`:
 - **Rules for new code** (at most 10 bullets): the lessons ordinary coding agents must
   follow so the debt does not come back (e.g. "keep functions under cognitive 15; extract
   the parsing phase").

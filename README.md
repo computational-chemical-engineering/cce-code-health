@@ -200,6 +200,11 @@ accepted-neutral --reason <why>` records a kept refactor or restructure step wit
 example names and docstrings from review notes): the gate JSON must come from a run without
 `--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
 and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
+`codehealth stats [--campaign C ...] [--runs FILE_OR_DIR ...]` summarises the run logs per recipe
+(tries, accepted, accepted-neutral, no-gain, gate-fails by tier, review-rejects including reverted
+accepts, rate, distinct files, median debt drop, median relocated share) with the playbook hints
+(promote after 3 accepts in 2 files, retire below 40 % after 5 tries, add a when-not after a
+gate-fail). Default sources: the live log and `.codehealth/runs/`, deduplicated.
 The run log is one file per clone (`--git-common-dir`), shared by all its worktrees: engineers on
 parallel branches in worktrees of one clone append to the same log under a file lock, and each
 record carries `branch`. Separate clones keep separate logs.

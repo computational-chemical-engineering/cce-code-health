@@ -539,6 +539,25 @@ def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
     return 0
 
 
+def cmd_stats(a) -> int:
+    from . import stats as statsmod  # noqa: PLC0415
+    repo = Path(a.repo).resolve()
+    paths = [Path(x) for x in a.runs] if a.runs else [gatemod._common_dir(repo) / "runs", repo / ".codehealth" / "runs"]
+    recs, warnings = statsmod.read_logs(paths)
+    if a.campaign:
+        recs = [r for r in recs if r.get("campaign") in a.campaign]
+    st = statsmod.recipe_stats(recs)
+    write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "sources": [str(p) for p in paths],
+                                 "campaigns": sorted({str(r.get("campaign")) for r in recs}), "records": len(recs)},
+                        "recipes": st, "warnings": warnings})
+    print("\n".join(statsmod.table(st)))
+    for w in warnings[:10]:
+        print(f"  WARNING {w}")
+    camps = sorted({str(r.get("campaign")) for r in recs})
+    print(f"STATS {repo.name}: {len(recs)} records, {len(st)} recipes, campaigns {', '.join(camps) or '-'}")
+    return 0
+
+
 def cmd_config(a) -> int:
     repo = Path(a.repo).resolve()
     if not a.check:
@@ -606,6 +625,13 @@ def main(argv: list[str] | None = None) -> int:
     ph = sub.add_parser("hook", help="Claude Code PostToolUse hook: per-file debt feedback from stdin JSON")
     ph.set_defaults(fn=cmd_hook)
     ph.add_argument("--base", default="HEAD", help="ref to compare the edited file against (default HEAD)")
+    pst = sub.add_parser("stats", help="playbook statistics per recipe from campaign run logs")
+    pst.set_defaults(fn=cmd_stats)
+    pst.add_argument("--repo", default=".")
+    pst.add_argument("--json", help="write the full report to this file")
+    pst.add_argument("--runs", nargs="+", help="run-log files or directories (default: the live log under "
+                     "<git-common-dir>/codehealth/runs and .codehealth/runs)")
+    pst.add_argument("--campaign", nargs="+", help="only these campaigns")
     pl = sub.add_parser("log", help="append one validated line to a campaign run log")
     pl.set_defaults(fn=cmd_log)
     pl.add_argument("--repo", default=".")
