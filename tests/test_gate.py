@@ -264,3 +264,19 @@ def test_campaign_cadence_excuses_docs_only_commits(repo, capsys):
     assert gate(repo, "--base", base, "--cadence", "campaign", "--json", str(repo.parent / "camp.json")) == 1
     checks = {c["name"]: c for c in json.loads((repo.parent / "camp.json").read_text())["checks"]}
     assert not checks["scope"]["ok"] and "docs/notes.md" in checks["scope"]["detail"]
+
+
+def _rep(path, nloc, dup, smells):
+    return {"path": path, "nloc": nloc, "dup_lines": dup, "dup_fraction": dup / nloc, "file_smells": smells}
+
+
+def test_concentrated_duplication_is_a_note_added_duplication_fails():
+    from cce_code_health.report import new_file_smells
+    rb = {"big.h": _rep("big.h", 1003, 59, ["large_file"])}
+    changes = [("M", "big.h", "big.h"), ("A", None, "part.h")]
+    split = {"big.h": _rep("big.h", 484, 0, []), "part.h": _rep("part.h", 519, 59, ["duplication"])}
+    errors, notes = new_file_smells(rb, split, changes)
+    assert errors == [] and len(notes) == 1 and "part.h: duplication 11% of nloc 519, concentrated" in notes[0]
+    added = {"big.h": _rep("big.h", 484, 0, []), "part.h": _rep("part.h", 519, 70, ["duplication"])}
+    errors, notes = new_file_smells(rb, added, changes)
+    assert errors == ["part.h: new file smell(s) duplication (nloc 519)"] and notes == []

@@ -104,7 +104,12 @@ rule: no public name may disappear from any module (no removed or moved modules)
 may become a re-export (`from <new> import Name`) only from an added planned file whose own API
 entry is identical; public names new at head must be listed in new_public, and every listed name
 must exist at head. Meta `plan` = {path, blob (sha at base), id}; `codehealth log` writes class
-`restructure` and, as for refactor, needs a debt drop for accepted.
+`restructure` and, as for refactor, needs a gain for accepted. In restructure mode a gain is a
+debt drop, or debt not rising while the size-smell weight over the touched files drops (meta
+`size_smells` [before, after]; huge_file 2, large_file 1): a verbatim split of a large file moves
+its function debt unchanged and is accepted for removing the size smell. In every mode a new
+`duplication` file smell is a note, not a failure, when the duplicated lines over the touched
+files did not rise (existing duplicates concentrated into a smaller file).
 
 Interface mode (`--mode interface --plan .codehealth/interface/<id>.toml`, see interface.py):
 deliberate public-API changes, exactly as the plan lists (removed, renamed, added); callers
@@ -1221,12 +1226,15 @@ def function_debts(reports: dict[str, dict]) -> dict[str, float]:
 
 
 def debt_check(repo: Path, base: str, cfg: config.Config, changes,
-               fns: dict | None = None) -> tuple[Check, float, float]:
+               fns: dict | None = None, smells: dict | None = None) -> tuple[Check, float, float]:
     """Debt over the touched in-scope files must not rise, and no touched file may newly fail
     analysis (it would score 0 debt), in every mode: (check, before, after). `fns`, if given,
     receives {"before": {path::name: debt}, "after": {...}} over the touched files (functions
-    with debt only), so that `codehealth log` can report a function target's own delta."""
+    with debt only), so that `codehealth log` can report a function target's own delta.
+    `smells`, if given, receives {"size": [before, after]}: the size-smell weight over the
+    touched files (report.size_smells), the gain of a file split in restructure mode."""
     from .cli import analyze_ref, new_errors  # noqa: PLC0415 (cli imports this module)
+    from .report import new_file_smells, size_smells  # noqa: PLC0415
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
     rb, rh = analyze_ref(repo, base, cfg, bp), analyze_ref(repo, None, cfg, hp)
@@ -1235,20 +1243,19 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     db = sum(r["debt"] for r in rb.values())
     dh = sum(r["debt"] for r in rh.values())
     errors = new_errors(rb, rh, changes)
+    if smells is not None:
+        smells["size"] = [size_smells(rb), size_smells(rh)]
     # a file that crosses a file-size or duplication threshold fails here, at the step that
     # caused it, as `codehealth diff` fails it over the branch (a later step cannot undo it
-    # without a restructure)
-    counterpart = {h: b for _, b, h in changes if h}
-    for path, r in sorted(rh.items()):
-        old = rb.get(counterpart.get(path) or "")
-        new = sorted(set(r["file_smells"]) - set(old["file_smells"] if old else []))
-        if new:
-            errors.append(f"{path}: new file smell(s) {', '.join(new)} (nloc {r['nloc']})")
+    # without a restructure); duplication concentrated by a split is a note
+    smell_errors, smell_notes = new_file_smells(rb, rh, changes)
+    errors += smell_errors
     base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
     brains = sorted(f"{r['path']}::{f['name']}" for r in rh.values() for f in r["functions"]
                     if f["brain"] and f["name"] not in base_brains)
     note = [f"new brain function(s): {', '.join(brains[:3])} (an intermediate; the milestone must "
             f"bring the count back)"] if brains else []
+    note += smell_notes[:2]
     return (Check("debt", dh <= db + 1e-9 and not errors,
                   "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3] + note)), db, dh)
 
@@ -1351,12 +1358,16 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         plan_data = {**load_plan(repo, base, plan, cfg), "kind": mode}
         if info is not None:
             info["plan"] = {"path": plan_data["path"], "blob": plan_data["blob"], "id": plan_data["id"]}
+    restructuring = mode == "restructure"
     mode = "refactor" if mode in ("restructure", "interface") else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
     fns: dict = {}
-    debt, db, dh = debt_check(repo, base, cfg, changes, fns)
+    smells: dict = {}
+    debt, db, dh = debt_check(repo, base, cfg, changes, fns, smells)
+    sb, sh = smells["size"]
     if info is not None:
-        info.update(debt_before=round(db, 2), debt_after=round(dh, 2), function_debt=fns)
+        info.update(debt_before=round(db, 2), debt_after=round(dh, 2), function_debt=fns,
+                    size_smells=[sb, sh])
     extra = []
     if revert:
         debt.ok = True
@@ -1370,9 +1381,12 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
             c.detail += " (allowed: exact revert)"
     checks = config_checks(cfg, changes, cadence, mode) + static + [debt] + extra
     if require_gain:
-        gained = dh < db - 1e-9
-        checks.append(Check("gain", gained, f"{db:.1f} -> {dh:.1f}" if gained
-                            else f"no debt reduction: {db:.1f} -> {dh:.1f}"))
+        split = restructuring and dh <= db + 1e-9 and sh < sb   # a split that removes a size smell
+        gained = dh < db - 1e-9 or split
+        sizes = f", size smells {sb} -> {sh}" if split else ""
+        checks.append(Check("gain", gained, f"{db:.1f} -> {dh:.1f}{sizes}" if gained
+                            else f"no debt reduction: {db:.1f} -> {dh:.1f}"
+                            + (f" (size smells {sb} -> {sh})" if restructuring else "")))
     if all(c.ok for c in checks):
         with open(log_path, "w") as log:
             checks += run_tiers(repo, base, cfg, changes, cadence, log, mode, ref_base=ref_sha)

@@ -15,6 +15,7 @@ from . import __version__, architecture, config, coupling, gitio
 from . import gate as gatemod
 from .hook import cmd_hook
 from .duplication import duplicated_lines
+from .report import new_file_smells
 from .python_backend import analyze
 from .report import file_report
 
@@ -147,12 +148,11 @@ def cmd_diff(a) -> int:
     failures += new_errors(rb, rh, ch)
     counterpart = {c[2]: c[1] for c in ch if c[2]}
     base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
+    smell_errors, smell_notes = new_file_smells(rb, rh, ch)
+    failures += smell_errors
     rows = []
     for path, r in sorted(rh.items()):
         old = rb.get(counterpart.get(path) or "")
-        new_smells = set(r["file_smells"]) - set(old["file_smells"] if old else [])
-        if new_smells:
-            failures.append(f"{path}: new file smell(s) {', '.join(sorted(new_smells))}")
         for f in r["functions"]:
             if f["brain"] and f["name"] not in base_brains:
                 bm = cfg.profile_for(path).brain_metric
@@ -205,11 +205,13 @@ def cmd_diff(a) -> int:
     failures += ds or []
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
                         "debt_base": round(db, 3), "debt_head": round(dh, 3),
-                        "failures": failures, "base": rb, "head": rh,
+                        "failures": failures, "notes": smell_notes, "base": rb, "head": rh,
                         **({"architecture_improvements": arch[1]} if arch else {}),
                         **({"docs": {"warnings": doc_res.warnings, "notes": doc_res.notes,
                                      "review": sorted(set(doc_res.review))}} if doc_res else {})})
     print("\n".join(rows))
+    for n in smell_notes:
+        print(f"  NOTE {n}")
     for f in failures:
         print(f"  FAIL {f}")
     verdict = "FAIL" if failures else "PASS"
@@ -448,10 +450,21 @@ RESULTS = ("accepted", "accepted-neutral", "gate-fail", "no-gain", "review-rejec
 KEPT = ("accepted", "accepted-neutral")   # results whose commit stays: must be committed
 
 
-def _infer_result(checks: list, mode: str, before: float, after: float) -> str:
+def _gained(m: dict) -> bool:
+    """A gain for `accepted`: optimize and interface steps always (judged by their tiers and
+    plan); otherwise a debt drop, or in restructure mode debt not rising while the size-smell
+    weight drops (a file split)."""
+    if m["mode"] in ("optimize", "interface") or m["debt_after"] < m["debt_before"] - EPS:
+        return True
+    sz = m.get("size_smells")
+    return (m["mode"] == "restructure" and m["debt_after"] <= m["debt_before"] + EPS
+            and isinstance(sz, list) and len(sz) == 2 and sz[1] < sz[0])
+
+
+def _infer_result(checks: list, m: dict) -> str:
     if any(not c["ok"] for c in checks):
         return "gate-fail"
-    return "accepted" if mode in ("optimize", "interface") or after < before - EPS else "no-gain"
+    return "accepted" if _gained(m) else "no-gain"
 
 
 def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
@@ -478,11 +491,11 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
             raise ValueError(f"--result {a.result} needs --reason")
     checks = data["checks"]
     failed = [c for c in checks if not c["ok"]]
-    gained = meta_["mode"] in ("optimize", "interface") or meta_["debt_after"] < meta_["debt_before"] - EPS
+    gained = _gained(meta_)
     if reverting:
         result = a.result or ("gate-fail" if failed else "review-reject")
     else:
-        result = a.result or _infer_result(checks, meta_["mode"], meta_["debt_before"], meta_["debt_after"])
+        result = a.result or _infer_result(checks, meta_)
     if not reverting and a.reason and result not in ("review-reject", "accepted-neutral", "gate-fail"):
         raise ValueError(f"--reason is only for review-reject, accepted-neutral or gate-fail (result: {result})")
     if result == "gate-fail" and not failed:
@@ -490,7 +503,9 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
     if result != "gate-fail" and failed:
         raise ValueError(f"--result {result} but check {failed[0]['name']} failed in the gate JSON")
     if result == "accepted" and not gained:
-        raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']}); "
+        raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']}"
+                         + (f", size smells {meta_['size_smells'][0]} -> {meta_['size_smells'][1]}"
+                            if meta_["mode"] == "restructure" and meta_.get("size_smells") else "") + "); "
                          "a deliberate step without gain (gated without --require-gain) is accepted-neutral")
     if result == "accepted-neutral":
         if meta_["mode"] in ("optimize", "interface"):

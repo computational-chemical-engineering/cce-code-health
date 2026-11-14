@@ -363,7 +363,11 @@ files), plus: added files must match `new_files` (check `plan`); no public name 
 any module, and a definition may become a re-export `from <new module> import Name` only when the
 planned new file defines it with the identical API entry; new public names must be listed in
 `new_public`, and each listed name must exist at head. Gate JSON `meta.plan` = {path, blob, id};
-`codehealth log` records class `restructure` (accepted needs a debt drop, as for refactor).
+`codehealth log` records class `restructure`. Accepted needs a gain: a debt drop, or debt not
+rising while the size-smell weight over the touched files drops (huge_file 2, large_file 1;
+meta `size_smells` [before, after]), so a verbatim split of a large file is accepted. In every
+mode, and in `codehealth diff`, a new `duplication` smell is a note, not a failure, when the
+duplicated lines over the touched files did not rise (a split concentrated existing duplicates).
 
 ### Interface steps (deliberate public-API changes)
 

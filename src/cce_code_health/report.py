@@ -69,10 +69,40 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
     penalty += 1.0 if "duplication" in smells else 0.0
     return {"path": fm.path, "nloc": fm.nloc, "error": fm.error,
             "debt": round(sum(f["debt"] for f in functions), 3),
-            "file_smells": smells, "dup_fraction": round(dup_frac, 3),
+            "file_smells": smells, "dup_fraction": round(dup_frac, 3), "dup_lines": dup_lines,
             "health": round(max(1.0, 10.0 - penalty), 2),
             "functions": functions,
             "classes": fm.classes,
             "max_lcom4": max((c["lcom4"] for c in fm.classes if c["lcom4"] is not None), default=None),
             "suppressions": [{"line": a.line, "smells": list(a.smells), "reason": a.reason,
                               "valid": a.valid, "file_level": a.file_level} for a in fm.allows]}
+
+
+SIZE_PENALTY = {"huge_file": 2, "large_file": 1}
+
+
+def size_smells(reports: dict[str, dict]) -> int:
+    """Size-smell weight over the reports (huge_file 2, large_file 1, as in display health)."""
+    return sum(SIZE_PENALTY.get(s, 0) for r in reports.values() for s in r["file_smells"])
+
+
+def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[list[str], list[str]]:
+    """(errors, notes) for head files with a file smell their base counterpart lacked.
+
+    A new `duplication` smell is a note, not an error, when the duplicated lines over the touched
+    files did not rise: the duplicates already existed and were concentrated into fewer lines (a
+    file split, or code deleted around them), not added. `rb`, `rh`: reports of the touched files."""
+    counterpart = {h: b for _, b, h in changes if h}
+    dup_rose = (sum(r.get("dup_lines", 0) for r in rh.values())
+                > sum(r.get("dup_lines", 0) for r in rb.values()))
+    errors, notes = [], []
+    for path, r in sorted(rh.items()):
+        old = rb.get(counterpart.get(path) or "")
+        new = sorted(set(r["file_smells"]) - set(old["file_smells"] if old else []))
+        if "duplication" in new and not dup_rose:
+            new.remove("duplication")
+            notes.append(f"{path}: duplication {r['dup_fraction']:.0%} of nloc {r['nloc']}, concentrated "
+                         f"not added (duplicated lines over the touched files did not rise)")
+        if new:
+            errors.append(f"{path}: new file smell(s) {', '.join(new)} (nloc {r['nloc']})")
+    return errors, notes

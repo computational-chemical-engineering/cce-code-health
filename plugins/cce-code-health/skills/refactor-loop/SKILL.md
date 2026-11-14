@@ -110,6 +110,10 @@ human commits `.codehealth/restructure/<id>.toml` (`id`, `approved_by`, `reason`
 `codehealth gate --mode restructure --plan .codehealth/restructure/<id>.toml ...`: new files
 and public names only as planned, every old import path kept as a re-export, behaviour
 bitwise. Commit trailer `Codehealth-Class: restructure`. Never write or edit the plan yourself.
+A verbatim split moves function debt unchanged; it counts as a gain (`--require-gain`,
+`accepted`) when debt does not rise and a large or huge file smell goes away. Duplicates
+that a split concentrates into a smaller file are a note, not a new smell; added
+duplication still fails.
 
 ## Review against gaming (every ~5 accepted steps)
 

@@ -162,3 +162,56 @@ def test_binders_accept_keyword_only_parameters_without_default():
     for src in ("def f(*, x): pass\n", "def g(a, *, x, y=1): pass\n", "async def h(*, x): pass\n"):
         names, star = _binders(ast.parse(src).body[0])
         assert names == {src.split()[1 if src.startswith("def") else 2].split("(")[0]} and not star
+
+
+SPLIT_PLAN = """
+id = "split-big"
+approved_by = "reviewer"
+reason = "split a large file"
+new_files = ["pkg/part.py"]
+new_public = []
+"""
+
+
+def _consts(lo, hi):
+    return "".join(f"_x{i} = {i}\n" for i in range(lo, hi))
+
+
+@pytest.fixture
+def big(tmp_path):
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".gitignore": "__pycache__/\n", ".codehealth/config.toml": CONFIG,
+                      ".codehealth/restructure/big.toml": SPLIT_PLAN, "pkg/__init__.py": "",
+                      "pkg/mod.py": MOD + _consts(0, 1100),
+                      "frozen/ident.py": "X = 1\n", "tests/test_x.py": "def test(): pass\n"})
+    return tmp_path
+
+
+def test_verbatim_split_of_large_file_is_a_gain(big, capsys):
+    (big / "pkg/mod.py").write_text(MOD + _consts(0, 600))
+    (big / "pkg/part.py").write_text(_consts(600, 1100))
+    gj = big.parent / "g.json"
+    assert gate(big, "--require-gain", "--json", str(gj), plan=".codehealth/restructure/big.toml") == 0
+    out = capsys.readouterr().out
+    assert "ok   gain" in out and "size smells 1 -> 0" in out
+    meta = json.loads(gj.read_text())["meta"]
+    assert meta["size_smells"] == [1, 0] and meta["debt_before"] == meta["debt_after"]
+    git(big, "add", "pkg/mod.py", "pkg/part.py")
+    git(big, "commit", "-qm", "split")
+    runs = big.parent / "split-runs.jsonl"
+    assert main(["log", "--repo", str(big), "--gate-json", str(gj), "--campaign", "c1",
+                 "--target", "pkg/mod.py", "--recipe", "split", "--out", str(runs)]) == 0
+    assert json.loads(runs.read_text())["result"] == "accepted"
+
+
+def test_shrinking_below_size_limit_is_no_gain_in_refactor_mode(big, capsys):
+    (big / "pkg/mod.py").write_text(MOD + _consts(0, 900))
+    assert main(["gate", "--repo", str(big), "--log", str(big.parent / "gate.log"), "--require-gain"]) == 1
+    assert "FAIL gain" in capsys.readouterr().out
+
+
+def test_split_still_needs_size_smell_removed(big, capsys):
+    (big / "pkg/mod.py").write_text(MOD + _consts(0, 1050))     # still large
+    (big / "pkg/part.py").write_text(_consts(1050, 1100))
+    assert gate(big, "--require-gain", plan=".codehealth/restructure/big.toml") == 1
+    assert "no debt reduction" in capsys.readouterr().out
