@@ -391,6 +391,13 @@ changed = ["src/pkg/run.py:run"]                                 # same name and
 added = ["src/pkg/core/solver.py:make_solver"]                   # new names that are not renames
 new_files = ["src/pkg/core/*.py"]
 callers = ["tests/**", "docs/examples/**"]                       # files that follow the change
+
+[[literals_added]]                                               # deliberate new string literals
+file = "src/pkg/core/region.py"
+literal = "LIQUID"
+count = 1                                                        # default 1
+reason = "private copy of the verifier's K evaluation (R-016)"
+# [[literals_removed]] has the same keys
 ```
 
 For changes an ADR makes on purpose (names removed, renamed, moved or re-signed, no shims). The
@@ -408,6 +415,11 @@ in refactor mode, except:
   difference fails, and `__all__` may change only by the names the plan lists for that file.
   A listed change the step did not make fails. The check's JSON entry carries `interface`:
   the old and new API text of each planned change, for review.
+- `literals`: with `literals_added` or `literals_removed` in the plan, the string-literal multiset
+  of the touched files may differ from base by exactly the declared entries (no globs, one file
+  each), and each entry must hold in its own file (that file's count of the literal moved by at
+  least `count` in that direction). The check reports "as planned: ..." and gate meta `plan`
+  carries the entries. Without them the rule is refactor's: no literal added or removed.
 - `plan`: added in-scope files match `new_files`; touched paths outside the scope or under
   `forbid` must match `callers`. Frozen paths and `.codehealth/` stay refused.
 - `retargeted`: the name leaves the old module (a dropped re-export, no shim) while its home

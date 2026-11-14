@@ -355,3 +355,58 @@ def test_retargeted_public_api():
     assert public_api_problems(full, py, base, head, _public_api, other)[0][0].startswith("plan retargeted old.py:X")
     shim = {"old.py": "from home import X\n\n\ndef keep():\n    pass\n"}
     assert "X is still bound in old.py" in public_api_problems(full, py, base, shim, _public_api, homes)[0][0]
+
+
+LIT = '''
+[[literals_added]]
+file = "pkg/mod.py"
+literal = "LIQUID"
+reason = "private copy of the verifier's K evaluation (R-016)"
+'''
+
+
+def lit_plan(repo, extra=LIT):
+    (repo / PLAN_PATH).write_text(PLAN + extra)
+    git(repo, "commit", "-qam", "plan with literals")
+
+
+def test_declared_literals_exactly(repo, capsys):
+    lit_plan(repo)
+    copy = '\n\ndef _phase(x):\n    return "LIQUID" if x else None\n'
+    apply(repo, head=HEAD + copy)
+    gj = repo.parent / "g.json"
+    assert gate(repo, "--json", str(gj)) == 0
+    assert "ok   literals" in capsys.readouterr().out
+    d = json.loads(gj.read_text())
+    lit = next(c for c in d["checks"] if c["name"] == "literals")
+    assert lit["detail"] == ("as planned: added 'LIQUID' x1 in pkg/mod.py "
+                             "(private copy of the verifier's K evaluation (R-016))")
+    assert d["meta"]["plan"]["literals_added"][0]["literal"] == "LIQUID"
+    apply(repo, head=HEAD + copy + '\n\ndef _status():\n    return "ok"\n', compat=True)   # one undeclared
+    assert gate(repo) == 1
+    assert "added 'ok' x1 not in the plan's literals_added" in capsys.readouterr().out
+    apply(repo, compat=True)                                                        # declared, not made
+    assert gate(repo) == 1
+    out = capsys.readouterr().out
+    assert "pkg/mod.py: 'LIQUID' changed by +0 in that file, plan says +1" in out
+    assert "plan's literals_added lists 'LIQUID' x1 more than the step added" in out
+
+
+def test_declared_literal_must_be_in_its_file(repo, capsys):
+    lit_plan(repo, LIT.replace("pkg/mod.py", "pkg/__init__.py"))
+    apply(repo, head=HEAD + '\n\ndef _phase():\n    return "LIQUID"\n')
+    assert gate(repo) == 1
+    assert "pkg/__init__.py: 'LIQUID' changed by +0 in that file" in capsys.readouterr().out
+
+
+def test_declared_literals_validation(repo, capsys):
+    bad = ('\n[[literals_added]]\nfile = "pkg/*.py"\nliteral = "X"\ncount = 0\n'
+           '\n[[literals_removed]]\nfile = "pkg/mod.py"\nliteral = 3\nreason = "r"\nwhy = "x"\n')
+    lit_plan(repo, bad)
+    assert gate(repo) == 2
+    err = capsys.readouterr().err
+    for msg in ("literals_added[1]: file must be one path/to/file.py (no glob)",
+                "literals_added[1]: count must be a positive integer",
+                "literals_added[1]: reason must be a non-empty string",
+                "literals_removed[1]: literal must be a string", "literals_removed[1]: unknown key 'why'"):
+        assert msg in err

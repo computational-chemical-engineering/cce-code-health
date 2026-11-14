@@ -44,7 +44,8 @@ from . import config, gitio
 
 PLAN_DIR = ".codehealth/interface/"
 PLAN_KEYS = {"id", "approved_by", "reason", "removed", "renamed", "retargeted", "changed", "added", "new_files",
-             "callers"}
+             "callers", "literals_added", "literals_removed"}
+LITERAL_KEYS = {"file", "literal", "count", "reason"}
 
 
 # -- plan --------------------------------------------------------------------------------------
@@ -109,8 +110,32 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
     for g in data.get("callers", []):
         if g.strip("*/") == "" or config.match(".codehealth/x.toml", g):
             bad.append(f"callers entry {g!r} is too broad (it would cover .codehealth/ or everything)")
-    if not (removed or ren or ret or changed or added):
-        bad.append("the plan lists no change (removed, renamed, changed or added)")
+    lits = {k: data.get(k, []) for k in ("literals_added", "literals_removed")}
+    for k, v in lits.items():
+        if not isinstance(v, list) or not all(isinstance(e, dict) for e in v):
+            bad.append(f"{k} must be an array of tables {{file, literal, count, reason}}")
+            lits[k] = []
+            continue
+        for i, e in enumerate(v, 1):
+            where = f"{k}[{i}]"
+            bad += [f"{where}: unknown key {x!r}" for x in sorted(set(e) - LITERAL_KEYS)]
+            f = e.get("file")
+            if not (isinstance(f, str) and f.endswith(".py") and ":" not in f and "*" not in f):
+                bad.append(f"{where}: file must be one path/to/file.py (no glob)")
+            elif not cfg.in_scope(f):
+                bad.append(f"{where}: file {f!r} is out of scope")
+            if not isinstance(e.get("literal"), str):
+                bad.append(f"{where}: literal must be a string (the exact value)")
+            c = e.get("count", 1)
+            if not (isinstance(c, int) and not isinstance(c, bool) and c > 0):
+                bad.append(f"{where}: count must be a positive integer")
+            if not (isinstance(e.get("reason"), str) and e["reason"].strip()):
+                bad.append(f"{where}: reason must be a non-empty string")
+        pairs = [(e.get("file"), e.get("literal")) for e in v if isinstance(e, dict)]
+        bad += [f"{k}: {f}: {lit!r} is listed twice" for f, lit in sorted({x for x in pairs if pairs.count(x) > 1},
+                                                                          key=repr)]
+    if not (removed or ren or ret or changed or added or lits["literals_added"] or lits["literals_removed"]):
+        bad.append("the plan lists no change (removed, renamed, changed, added or literals)")
     if bad:
         raise ValueError(f"plan {path}: " + "; ".join(bad))
     blob = gitio.git(repo, "rev-parse", f"{base}:{path}").decode().strip()
@@ -118,6 +143,8 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
             "removed": list(removed), "renamed": dict(ren), "retargeted": dict(ret), "changed": list(changed),
             "added": list(added),
             "new_files": list(data.get("new_files", [])), "callers": list(data.get("callers", [])),
+            "literals_added": [{**e, "count": e.get("count", 1)} for e in lits["literals_added"]],
+            "literals_removed": [{**e, "count": e.get("count", 1)} for e in lits["literals_removed"]],
             "path": path, "blob": blob}
 
 
@@ -145,6 +172,34 @@ def plan_problems(plan: dict, changes, cfg: config.Config, forbid: list[str]) ->
             if (not cfg.in_scope(p) or any(config.match(p, g) for g in forbid))
             and not any(config.match(p, g) for g in plan["callers"])]
     return out
+
+
+def literal_problems(plan: dict, gone: Counter, new: Counter, per_b: dict, per_h: dict) -> list[str]:
+    """The touched files' string-literal multiset (keys repr(value)) may differ from base by exactly
+    the plan's literals_added and literals_removed, and each declared entry must hold in its own
+    file (that file's count of the literal changed by at least `count` in that direction).
+    gone/new: base - head and head - base over all touched files; per_b/per_h: {path: Counter}."""
+    out = []
+    want = {"literals_added": Counter(), "literals_removed": Counter()}
+    for k, sign in (("literals_added", 1), ("literals_removed", -1)):
+        for e in plan.get(k, []):
+            key = repr(e["literal"])
+            want[k][key] += e["count"]
+            d = per_h.get(e["file"], Counter())[key] - per_b.get(e["file"], Counter())[key]
+            if d * sign < e["count"]:
+                out.append(f"{k}: {e['file']}: {e['literal']!r} changed by {d:+d} in that file, "
+                           f"plan says {sign * e['count']:+d}")
+    for k, got, verb in (("literals_added", new, "added"), ("literals_removed", gone, "removed")):
+        if got != want[k]:
+            extra, missing = got - want[k], want[k] - got
+            out += [f"{verb} {lit} x{n} not in the plan's {k}" for lit, n in sorted(extra.items())]
+            out += [f"plan's {k} lists {lit} x{n} more than the step {verb}" for lit, n in sorted(missing.items())]
+    return out
+
+
+def literal_record(plan: dict) -> list[str]:
+    return [f"{'added' if k == 'literals_added' else 'removed'} {e['literal']!r} x{e['count']} "
+            f"in {e['file']} ({e['reason']})" for k in ("literals_added", "literals_removed") for e in plan.get(k, [])]
 
 
 def all_strings(plan: dict, texts: dict[str, str]) -> Counter:

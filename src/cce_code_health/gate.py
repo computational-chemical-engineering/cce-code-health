@@ -114,7 +114,8 @@ files did not rise (existing duplicates concentrated into a smaller file).
 Interface mode (`--mode interface --plan .codehealth/interface/<id>.toml`, see interface.py):
 deliberate public-API changes, exactly as the plan lists (removed, renamed, added); callers
 outside the scope or under forbid may follow when they match the plan's `callers`; accepted
-needs no debt drop.
+needs no debt drop. String literals may differ from base by exactly the plan's
+`literals_added`/`literals_removed` entries ({file, literal, count, reason}; see interface.py).
 
 Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
 - `skip_exit = 77` (int or list, any tier kind): a run of the tier (base or head) exiting with one
@@ -415,16 +416,20 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
     def with_cpp(detail):
         return "; ".join(x for x in (detail, unchecked) if x)
     if g.get("literals", False):
-        lb, lh = Counter(), Counter()
-        for t in tb.values():
-            lb += _string_literals(t)
-        for t in th.values():
-            lh += _string_literals(t)
+        per_b = {p: _string_literals(t) for p, t in tb.items()}
+        per_h = {p: _string_literals(t) for p, t in th.items()}
+        lb, lh = sum(per_b.values(), Counter()), sum(per_h.values(), Counter())
         if iface:                                  # __all__ of the plan's files: left to public_api
             lb, lh = lb - interface.all_strings(plan, tb), lh - interface.all_strings(plan, th)
         gone, new = lb - lh, lh - lb
-        detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
-        checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
+        declared = iface and (plan.get("literals_added") or plan.get("literals_removed"))
+        if declared:                               # interface plan: exactly the declared literals
+            problems = interface.literal_problems(plan, gone, new, per_b, per_h)
+            detail = "; ".join(problems[:4] if problems else ["as planned: " + "; ".join(interface.literal_record(plan))])
+            checks.append(Check("literals", not problems, with_cpp(detail[:600])))
+        else:
+            detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
+            checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
     if iface:                                      # gate() refuses interface mode without public_api
         hp_ = sorted({interface._split(n)[0] for n in plan.get("retargeted", {}).values()})
         hb_, hh_ = gitio.read_files(repo, base, hp_), gitio.read_files(repo, None, hp_)
@@ -1375,6 +1380,9 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         plan_data = {**load_plan(repo, base, plan, cfg), "kind": mode}
         if info is not None:
             info["plan"] = {"path": plan_data["path"], "blob": plan_data["blob"], "id": plan_data["id"]}
+            for k in ("literals_added", "literals_removed"):
+                if plan_data.get(k):
+                    info["plan"][k] = plan_data[k]
     restructuring = mode == "restructure"
     mode = "refactor" if mode in ("restructure", "interface") else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
