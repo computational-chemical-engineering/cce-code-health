@@ -49,6 +49,7 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - OpenFlowsheet S19 request (2026-11-14, done): `log --rerun-of STEP --reason` records a re-gated tree whose earlier records are all gate-fails (flaky wall-time tier, A6 part 1); record carries rerun_of + prior_gate_json; stats counts superseded gate-fails as reruns. 328 tests.
 - dem campaign gate PASS on 93a36d8 (peclet_health 2026-11-14): head 4055ffc vs CB 3fd9b93, 13/13, debt over touched 1465.6 -> 1229.2, clang_tidy base 2512 -> head 1552 (5 per-file rises offset by moved code). Frank (Decision Desk): S8 = solveVelocityColoredGS + hertzWallForces with the S7 recipe, then the PR; pnm held until junction-law lands. v0.2.0 tag waits for dem S5 (done) + OFS W4.
 - OpenFlowsheet S19 I-15 request (2026-11-14, done): interface plan keys `literals_added`/`literals_removed` ({file, literal, count, reason}); literals check passes only on exactly the declared multiset difference, each entry true in its own file; meta plan carries them. 331 tests.
+- OFS I-15 passed on 8b40f31 (17/17, 8 declared literals). Follow-up done: `literals` detail lists every difference (no cap); console truncates any check detail at 600 chars, the gate JSON keeps it whole.
 - Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 

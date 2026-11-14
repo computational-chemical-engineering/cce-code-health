@@ -433,7 +433,9 @@ def cmd_gate(a) -> int:
                                  "trial": bool(a.config), "head_tree": head_tree},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
-        print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {c.detail}")
+        detail = c.detail if len(c.detail) <= DETAIL_CHARS else (
+            c.detail[:DETAIL_CHARS] + f" ... ({len(c.detail)} chars{'; full detail in --json' if not a.json else ''})")
+        print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {detail}")
     failed = [c.name for c in checks if not c.ok]
     verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
     print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
@@ -446,6 +448,7 @@ def cmd_gate(a) -> int:
     return 1 if failed else 3 if a.config else 0
 
 
+DETAIL_CHARS = 600   # console line per check; the gate JSON keeps the full detail
 RESULTS = ("accepted", "accepted-neutral", "gate-fail", "no-gain", "review-reject")
 KEPT = ("accepted", "accepted-neutral")   # results whose commit stays: must be committed
 

@@ -280,3 +280,12 @@ def test_concentrated_duplication_is_a_note_added_duplication_fails():
     added = {"big.h": _rep("big.h", 484, 0, []), "part.h": _rep("part.h", 519, 70, ["duplication"])}
     errors, notes = new_file_smells(rb, added, changes)
     assert errors == ["part.h: new file smell(s) duplication (nloc 519)"] and notes == []
+
+
+def test_literals_detail_lists_every_difference(repo, capsys):
+    extra = "".join(f'\n\ndef _f{i}():\n    return "lit{i}" + "x"\n' for i in range(8))
+    edit(repo, "pkg/mod.py", MOD + extra)
+    gj = repo.parent / "lit.json"
+    assert gate(repo, "--json", str(gj)) == 1
+    lit = next(c for c in json.loads(gj.read_text())["checks"] if c["name"] == "literals")
+    assert all(f"added 'lit{i}'" in lit["detail"] for i in range(8)) and "added 'x' x8" in lit["detail"]

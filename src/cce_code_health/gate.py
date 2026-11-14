@@ -425,11 +425,12 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         declared = iface and (plan.get("literals_added") or plan.get("literals_removed"))
         if declared:                               # interface plan: exactly the declared literals
             problems = interface.literal_problems(plan, gone, new, per_b, per_h)
-            detail = "; ".join(problems[:4] if problems else ["as planned: " + "; ".join(interface.literal_record(plan))])
-            checks.append(Check("literals", not problems, with_cpp(detail[:600])))
-        else:
-            detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
-            checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
+            detail = "; ".join(problems if problems else ["as planned: " + "; ".join(interface.literal_record(plan))])
+            checks.append(Check("literals", not problems, with_cpp(detail)))
+        else:                                      # every difference, so one run shows the full set
+            detail = "; ".join([f"removed {k} x{n}" if n > 1 else f"removed {k}" for k, n in sorted(gone.items())]
+                               + [f"added {k} x{n}" if n > 1 else f"added {k}" for k, n in sorted(new.items())])
+            checks.append(Check("literals", not gone and not new, with_cpp(detail)))
     if iface:                                      # gate() refuses interface mode without public_api
         hp_ = sorted({interface._split(n)[0] for n in plan.get("retargeted", {}).values()})
         hb_, hh_ = gitio.read_files(repo, base, hp_), gitio.read_files(repo, None, hp_)
