@@ -380,8 +380,13 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         cp = interface.caller_paths(plan, changes, cfg, list(g.get("forbid", [])))
         cb = gitio.read_files(repo, base, sorted({bp for _, bp, _ in cp if bp}))
         ch = gitio.read_files(repo, None, sorted({hp for _, _, hp in cp if hp}))
-        hit = interface.caller_problems(plan, cp, cb, ch, (cfg.architecture or {}).get("roots", ["src", "."]))
-        checks.append(Check("callers", not hit, "; ".join(hit[:5]) or f"{len(cp)} caller file(s) follow the plan"))
+        hit, rec = interface.caller_record(plan, cp, cb, ch, (cfg.architecture or {}).get("roots", ["src", "."]))
+        summary = (f"{len(cp)} caller file(s) follow the plan; {len(rec['deleted'])} statement(s) deleted"
+                   f"{' (' + '; '.join(rec['deleted'][:3]) + ')' if rec['deleted'] else ''}; "
+                   f"{rec['changed_calls']} changed call(s)")
+        c = Check("callers", not hit, "; ".join(hit[:5]) or summary)
+        c.callers = rec                            # every deleted statement, for review
+        checks.append(c)
     elif plan is not None:
         hit = restructure.plan_problems(plan, changes)
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
@@ -414,7 +419,10 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
         checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
     if iface:                                      # gate() refuses interface mode without public_api
-        problems, record = interface.public_api_problems(plan, py, tb, th, _public_api)
+        hp_ = sorted({interface._split(n)[0] for n in plan.get("retargeted", {}).values()})
+        hb_, hh_ = gitio.read_files(repo, base, hp_), gitio.read_files(repo, None, hp_)
+        homes = {p: (hb_.get(p), hh_.get(p)) for p in hp_}
+        problems, record = interface.public_api_problems(plan, py, tb, th, _public_api, homes)
         c = Check("public_api", not problems, with_cpp("; ".join(problems[:5])))
         c.interface = record                       # old and new API text per planned change
         checks.append(c)

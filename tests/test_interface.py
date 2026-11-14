@@ -6,7 +6,7 @@ from test_git import commit, git
 
 from cce_code_health.cli import main
 from cce_code_health.gate import _public_api
-from cce_code_health.interface import public_api_problems
+from cce_code_health.interface import caller_problems, public_api_problems
 
 PLAN_PATH = ".codehealth/interface/adr.toml"
 PLAN = """
@@ -230,7 +230,7 @@ def test_callers_rename_import_and_changed_call():
     weak = head.replace("assert run(1, report=None) == 3", "run(1, report=None)")
     assert caller_problems(plan, cp, {"tests/t.py": base}, {"tests/t.py": weak}, ["src"])
     shim = head.replace("from pkg.core.n import new", "from unittest.mock import MagicMock as new")
-    assert any("imports differ" in p for p in caller_problems(plan, cp, {"tests/t.py": base},
+    assert any("beyond the plan" in p for p in caller_problems(plan, cp, {"tests/t.py": base},
                                                               {"tests/t.py": shim}, ["src"]))
 
 
@@ -251,3 +251,107 @@ def test_gate_json_records_api_text(repo):
     rec = next(c for c in json.loads(gj.read_text())["checks"] if c["name"] == "public_api")["interface"]
     assert rec["renamed"] == [{"old": "pkg/mod.py:old_name", "new": "pkg/mod.py:new_name", "api": "(z, k=1)"}]
     assert {"name": "pkg/compat.py"} in rec["removed"]
+
+
+# -- regressions from the second think review (callers rule, 2026-11-14) -------------------------
+
+from cce_code_health.interface import caller_record  # noqa: E402
+
+P = {"removed": ["src/pkg/m.py:legacy"], "renamed": {"src/pkg/m.py:old": "src/pkg/core/n.py:new"},
+     "changed": ["src/pkg/m.py:run"], "added": [], "callers": ["tests/**"]}
+H = "import pytest\nfrom pkg.m import run\n\n"
+
+
+def cpb(base, head, plan=P, path="tests/t.py"):
+    return caller_problems(plan, [("M", path, path)], {path: base}, {path: head}, ["src"])
+
+
+@pytest.mark.parametrize("base,head,plan,path", [
+    (H + "def test_c():\n    assert run(1) == 3\n", H + "@pytest.mark.skip\ndef test_c():\n    run\n", P, "tests/t.py"),
+    (H + "class TestR:\n    def test_c(self):\n        assert run(1) == 3\n", H + "class TestR(object):\n    run\n",
+     P, "tests/t.py"),
+    (H + "def test_c():\n    assert run(1) == 3\n", H + "def test_c():\n    assert run(1) or True\n", P, "tests/t.py"),
+    (H + "def solver():\n    return run(make())\n", H + "def solver():\n    return type('M', (), {'f': run})()\n",
+     P, "tests/t.py"),
+    (H + "from pkg.m import legacy\nclass TestAll:\n    def test_a(self):\n        assert run(1) == 3\n"
+         "    def test_b(self):\n        assert legacy() == 2\n", H, P, "tests/t.py"),
+    (H + "def test_e():\n    try:\n        f()\n    except KeyError:\n        pass\n",
+     H + "def test_e():\n    try:\n        f()\n    except BaseException:\n        pass\n",
+     {**P, "removed": [], "renamed": {}, "changed": []}, "tests/t.py"),
+    ("run: 3.14159\n", "run: 2.0\n", P, "tests/data/expected.txt"),
+    (H + "import subprocess\ndef test_s():\n    assert subprocess.run(['true']).returncode == 0\n",
+     H + "import subprocess\ndef test_s():\n    assert subprocess.run(['false']) or 1\n", P, "tests/t.py"),
+    ("def test_h(client):\n    assert client.api.status == 200\n    assert client.ok\n",
+     "def test_h(client):\n    assert client.ok\n", {**P, "removed": ["src/pkg/api.py"]}, "tests/t.py"),
+    ("from tests.helpers import legacy\ndef test_h():\n    assert legacy(3) == 9\n", "", P, "tests/t.py"),
+    ("from pkg.m import run\ndef test_a():\n    assert run(1) == 3\ndef test_f():\n    from tests.fakes import run\n"
+     "    assert run(1) == 0\n",
+     "from pkg.m import run\nfrom tests.fakes import run\ndef test_a():\n    assert run(1) == 3\ndef test_f():\n"
+     "    assert run(1) == 0\n", P, "tests/t.py"),
+    ("from pkg.core.n import new\n\ndef test_a():\n    assert new(1) == 1\n",
+     "from unittest.mock import MagicMock as new\n\ndef test_a():\n    assert new(1) == 1\n", P, "tests/t.py"),
+])
+def test_callers_weakening_fails(base, head, plan, path):
+    assert cpb(base, head, plan, path)
+
+
+PR = {**P, "renamed": {"src/pkg/m.py:run": "src/pkg/m.py:execute"}, "changed": []}
+PM = {**P, "renamed": {"src/pkg/b.py": "src/pkg/core/b.py", "src/pkg/b.py:old": "src/pkg/core/b.py:new"}}
+PC = {**P, "renamed": {"src/pkg/a.py:LocalApplication": "src/pkg/b.py:LocalApplication"}, "changed": [], "removed": []}
+
+
+@pytest.mark.parametrize("base,head,plan", [
+    ("import subprocess\nfrom pkg.m import run\ndef test():\n    subprocess.run(['true'])\n    assert run(1) == 3\n",
+     "import subprocess\nfrom pkg.m import execute\ndef test():\n    subprocess.run(['true'])\n    assert execute(1) == 3\n",
+     PR),
+    ("from unittest import mock\ndef test():\n    with mock.patch('pkg.m.old'):\n        pass\n",
+     "from unittest import mock\ndef test():\n    with mock.patch('pkg.core.n.new'):\n        pass\n", P),
+    ("from pkg.m import legacy as L\ndef test():\n    assert L() == 2\ndef test_z():\n    pass\n",
+     "def test_z():\n    pass\n", P),
+    ("import pkg.b\ndef test():\n    assert pkg.b.old() == 1\n",
+     "import pkg.core.b\ndef test():\n    assert pkg.core.b.new() == 1\n", PM),
+    (H + "def t():\n    assert run(1, 2) == 3\n", H + "def t():\n    assert run(\n        1,\n        2,\n    ) == 3\n", P),
+    (H + "def t():\n    assert run(1) == 3\n", H + "def t():\n    assert run(1, report=None) == 3\n", P),
+    # patch-following (OpenFlowsheet Q-F5): the patch target follows a moved class or module
+    ("from pkg.a import LocalApplication\n\ndef test(monkeypatch):\n"
+     "    monkeypatch.setattr(LocalApplication, '_run_result', lambda s: 1)\n",
+     "from pkg.b import LocalApplication\n\ndef test(monkeypatch):\n"
+     "    monkeypatch.setattr(LocalApplication, '_run_result', lambda s: 1)\n", PC),
+    ("import pkg.a as A\n\ndef test(monkeypatch):\n    monkeypatch.setattr(A, 'LocalApplication', None)\n",
+     "import pkg.b as B\n\ndef test(monkeypatch):\n    monkeypatch.setattr(B, 'LocalApplication', None)\n", PC),
+    ("from unittest import mock\n\ndef test():\n    with mock.patch.object(__import__('x'), 'y'):\n        pass\n"
+     "    with mock.patch('pkg.a.LocalApplication._run_result'):\n        pass\n",
+     "from unittest import mock\n\ndef test():\n    with mock.patch.object(__import__('x'), 'y'):\n        pass\n"
+     "    with mock.patch('pkg.b.LocalApplication._run_result'):\n        pass\n", PC),
+])
+def test_callers_legitimate_follow_passes(base, head, plan):
+    assert cpb(base, head, plan) == []
+
+
+def test_callers_patch_target_must_follow_exactly():
+    base = "from pkg.a import LocalApplication\n\ndef test(mp):\n    mp.setattr(LocalApplication, '_run_result', 1)\n"
+    head = "from pkg.b import LocalApplication\n\ndef test(mp):\n    mp.setattr(LocalApplication, '_other', 1)\n"
+    assert cpb(base, head, PC)
+
+
+def test_callers_binary_and_record():
+    assert cpb("\x00�1", "\x00�2", P, "tests/data/x.npy") == ["tests/data/x.npy: binary caller file may not change"]
+    base = H + "from pkg.m import legacy\n\ndef test_b():\n    assert legacy() == 2\n\n\ndef test_c():\n    assert run(1) == 3\n"
+    head = H + "\ndef test_c():\n    assert run(1, report=None) == 3\n"
+    probs, rec = caller_record(P, [("M", "tests/t.py", "tests/t.py")], {"tests/t.py": base}, {"tests/t.py": head}, ["src"])
+    assert probs == [] and rec["changed_calls"] == 1
+    assert rec["deleted"] == ["tests/t.py:6 def test_b():"]
+
+
+def test_retargeted_public_api():
+    base = {"old.py": "def X():\n    pass\n\n\ndef keep():\n    pass\n"}
+    head = {"old.py": "def keep():\n    pass\n"}
+    homes = {"home.py": ("def X():\n    pass\n", "def X():\n    pass\n")}
+    full = {"removed": [], "renamed": {}, "changed": [], "added": [], "new_files": [], "callers": [],
+            "retargeted": {"old.py:X": "home.py:X"}}
+    py = [("old.py", "old.py")]
+    assert public_api_problems(full, py, base, head, _public_api, homes)[0] == []
+    other = {"home.py": ("def X(a):\n    pass\n", "def X(a):\n    pass\n")}
+    assert public_api_problems(full, py, base, head, _public_api, other)[0][0].startswith("plan retargeted old.py:X")
+    shim = {"old.py": "from home import X\n\n\ndef keep():\n    pass\n"}
+    assert "X is still bound in old.py" in public_api_problems(full, py, base, shim, _public_api, homes)[0][0]

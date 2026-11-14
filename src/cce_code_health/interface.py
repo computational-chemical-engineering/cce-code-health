@@ -33,6 +33,7 @@ checks ok and needs no debt drop (the API change is the purpose; debt still may 
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 import re
 import tomllib
@@ -42,7 +43,8 @@ from pathlib import Path
 from . import config, gitio
 
 PLAN_DIR = ".codehealth/interface/"
-PLAN_KEYS = {"id", "approved_by", "reason", "removed", "renamed", "changed", "added", "new_files", "callers"}
+PLAN_KEYS = {"id", "approved_by", "reason", "removed", "renamed", "retargeted", "changed", "added", "new_files",
+             "callers"}
 
 
 # -- plan --------------------------------------------------------------------------------------
@@ -81,33 +83,40 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
     ren = data.get("renamed", {})
     if not isinstance(ren, dict) or not all(isinstance(v, str) and v for v in ren.values()):
         bad.append("renamed must be a table of \"old\" = \"new\" strings")
+    ret = data.get("retargeted", {})
+    if not isinstance(ret, dict) or not all(isinstance(v, str) and v for v in ret.values()):
+        bad.append("retargeted must be a table of \"old.py:Name\" = \"home.py:Name\" strings")
     if bad:
         raise ValueError(f"plan {path}: " + "; ".join(bad))
     removed, changed, added = data.get("removed", []), data.get("changed", []), data.get("added", [])
-    entries = [*removed, *changed, *added, *ren, *ren.values()]
+    entries = [*removed, *changed, *added, *ren, *ren.values(), *ret, *ret.values()]
     bad += [f"entry {e!r} must be path/to/file.py or path/to/file.py:Name" for e in entries if not _entry_ok(e)]
     bad += [f"{k} entry {e!r} must name a public name (path:Name)"
             for k, v in (("added", added), ("changed", changed)) for e in v if ":" not in e]
     for old, new in ren.items():
         if (":" in old) != (":" in new):
             bad.append(f"renamed {old!r} = {new!r}: both path:Name, or both module paths")
+    for old, new in ret.items():
+        if ":" not in old or ":" not in new or _split(old)[0] == _split(new)[0]:
+            bad.append(f"retargeted {old!r} = {new!r}: both path:Name, in two different modules")
     bad += [f"entry {e!r} is out of scope" for e in entries if _entry_ok(e) and not cfg.in_scope(_split(e)[0])]
     gone_mods = {e for e in removed if ":" not in e} | {o for o in ren if ":" not in o}
     bad += [f"entry {e!r} names a module the plan removes or renames: list the module entry only, "
             f"or name the new path" for e in entries if ":" in e and _split(e)[0] in gone_mods]
-    names = [e for e in [*removed, *changed, *added, *ren] if ":" in e]
+    names = [e for e in [*removed, *changed, *added, *ren, *ret] if ":" in e]
     bad += [f"entry {e!r} is listed twice" for e in sorted({e for e in names if names.count(e) > 1})]
     bad += [f"new_files entry {g!r} is out of scope" for g in data.get("new_files", []) if not cfg.in_scope(g)]
     for g in data.get("callers", []):
         if g.strip("*/") == "" or config.match(".codehealth/x.toml", g):
             bad.append(f"callers entry {g!r} is too broad (it would cover .codehealth/ or everything)")
-    if not (removed or ren or changed or added):
+    if not (removed or ren or ret or changed or added):
         bad.append("the plan lists no change (removed, renamed, changed or added)")
     if bad:
         raise ValueError(f"plan {path}: " + "; ".join(bad))
     blob = gitio.git(repo, "rev-parse", f"{base}:{path}").decode().strip()
     return {"id": data["id"], "approved_by": data["approved_by"], "reason": data["reason"],
-            "removed": list(removed), "renamed": dict(ren), "changed": list(changed), "added": list(added),
+            "removed": list(removed), "renamed": dict(ren), "retargeted": dict(ret), "changed": list(changed),
+            "added": list(added),
             "new_files": list(data.get("new_files", [])), "callers": list(data.get("callers", [])),
             "path": path, "blob": blob}
 
@@ -141,8 +150,8 @@ def plan_problems(plan: dict, changes, cfg: config.Config, forbid: list[str]) ->
 def all_strings(plan: dict, texts: dict[str, str]) -> Counter:
     """repr() of the `__all__` elements of the files the plan names (left to public_api by the
     literals rule)."""
-    paths = {_split(e)[0] for e in [*plan["removed"], *plan["changed"], *plan["added"],
-                                     *plan["renamed"], *plan["renamed"].values()]}
+    paths = {_split(e)[0] for e in [*plan["removed"], *plan["changed"], *plan["added"], *plan["renamed"],
+                                     *plan["renamed"].values(), *plan.get("retargeted", {})]}
     out: Counter = Counter()
     for p in paths & set(texts):
         v = _all_value(texts[p])
@@ -261,13 +270,15 @@ def bound(source: str) -> set[str]:
 
 # -- the exact public-API rule -----------------------------------------------------------------
 
-def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> tuple[list[str], dict]:
+def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
+                        homes: dict | None = None) -> tuple[list[str], dict]:
     """Exact interface rule over the touched in-scope (base path, head path) pairs; returns
-    (problems, record) where record lists each planned change with its old and new API text."""
+    (problems, record) where record lists each planned change with its old and new API text.
+    `homes`: {path: (base text, head text)} of each `retargeted` home module."""
     api_b = {bp: api(tb[bp], bp, public_api) for bp, _ in py if bp in tb}
     api_h = {hp: api(th[hp], hp, public_api) for _, hp in py if hp in th}
     bound_h = {hp: bound(th[hp]) for hp in api_h}
-    record: dict = {"changed": [], "renamed": [], "removed": [], "added": []}
+    record: dict = {"changed": [], "renamed": [], "retargeted": [], "removed": [], "added": []}
 
     def entries(key):
         out: dict[str, set] = {}
@@ -348,6 +359,24 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> tuple
         for k in [k for k in h if k.startswith(nn + ".") and k not in added.get(pn, set())]:
             problems.append(f"{pn}: {k} added to renamed {nn} (not in the plan)")
             h.pop(k)
+    # retargets: the name leaves the old module (no shim); its home already had it, unchanged
+    for o, n in plan.get("retargeted", {}).items():
+        (po, no), (ph, nh) = _split(o), _split(n)
+        g = gone.get(po, {})
+        hb, hh = (homes or {}).get(ph, (None, None))
+        ab = api(hb, ph, public_api) if hb is not None else {}
+        ah = api(hh, ph, public_api) if hh is not None else {}
+        if no not in g or still_bound(po, no):
+            problems.append(f"plan retargeted {o} = {n}: {no} is still bound in {po}")
+            continue
+        if nh not in ab or ab.get(nh) != ah.get(nh):
+            problems.append(f"plan retargeted {o} = {n}: {nh} must exist in {ph} at base and stay unchanged")
+            continue
+        for k in [k for k in g if k == no or k.startswith(no + ".")]:
+            if ab.get(nh + k[len(no):]) != g[k]:
+                problems.append(f"plan retargeted {o} = {n}: {k} differs from {ph}:{nh + k[len(no):]}")
+            g.pop(k)
+        record["retargeted"].append({"old": o, "home": n, "api": ab[nh]})
     # listed removals, signature changes and additions must happen in this step
     for p, ns in sorted(removed.items()):
         for n in sorted(ns):
@@ -407,6 +436,17 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api) -> tuple
 
 
 # -- callers follow the plan, nothing else -----------------------------------------------------
+#
+# Each caller file is normalised on both sides: every name and attribute chain that a file's own
+# imports bind (per scope: module, class, function) becomes one token naming the full dotted
+# target, imports themselves drop out, and `setattr(obj, "name")`-style patch targets and dotted
+# strings become such tokens too. The plan's renames are applied to the base tokens. Head must
+# then equal base statement by statement, except that a statement using a removed name may be
+# deleted and the arguments of a call to a changed name may differ.
+
+_TOK = re.compile(r"^⟨(.+)⟩$")          # ⟨dotted.target⟩
+_DOTTED = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$")
+
 
 def _dotted(path: str, roots) -> str | None:
     from .architecture import module_name  # noqa: PLC0415
@@ -414,199 +454,283 @@ def _dotted(path: str, roots) -> str | None:
     return m[0] if m else None
 
 
-class _Rename(ast.NodeTransformer):
-    """Base caller source with the plan's renames applied: names, attributes, modules."""
-
-    def __init__(self, names: dict[str, str], modules: dict[str, str]):
-        self.names, self.modules = names, modules
-
-    def _mod(self, dotted: str | None) -> str | None:
-        if dotted is None:
-            return None
-        for o, n in sorted(self.modules.items(), key=lambda x: -len(x[0])):
-            if dotted == o or dotted.startswith(o + "."):
-                return n + dotted[len(o):]
-        return dotted
-
-    def visit_Name(self, node):
-        node.id = self.names.get(node.id, node.id)
-        return node
-
-    def visit_Attribute(self, node):
-        chain, cur = [], node
-        while isinstance(cur, ast.Attribute):
-            chain.append(cur.attr)
-            cur = cur.value
-        if isinstance(cur, ast.Name):
-            dotted = ".".join([cur.id, *reversed(chain)])
-            moved = self._mod(dotted)
-            if moved != dotted:
-                return ast.parse(moved, mode="eval").body
-        self.generic_visit(node)
-        node.attr = self.names.get(node.attr, node.attr)
-        return node
-
-    def visit_alias(self, node):
-        node.name = self._mod(node.name) if "." in node.name else self.names.get(node.name, node.name)
-        if node.asname:
-            node.asname = self.names.get(node.asname, node.asname)
-        return node
-
-    def visit_ImportFrom(self, node):
-        node.module = self._mod(node.module)
-        self.generic_visit(node)
-        return node
+def _targets_map(plan: dict, roots) -> tuple[dict, set, set, set, set, set]:
+    """(renames old dotted -> new dotted, removed dotted, changed dotted, removed member bare
+    names, changed member bare names, top-level packages) from the plan."""
+    def full(e):
+        p, n = _split(e)
+        d = _dotted(p, roots)
+        return None if d is None else (d if n is None else f"{d}.{n}")
+    renames = {}
+    for o, n in [*plan["renamed"].items(), *plan.get("retargeted", {}).items()]:
+        fo, fn = full(o), full(n)
+        if fo and fn:
+            renames[fo] = fn
+    removed = {full(e) for e in plan["removed"]} - {None}
+    changed = {full(e) for e in plan["changed"]} - {None}
+    rem_members = {_split(e)[1].split(".")[-1] for e in plan["removed"] if ":" in e and "." in _split(e)[1]}
+    chg_members = {_split(e)[1].split(".")[-1] for e in plan["changed"] if "." in _split(e)[1]}
+    tops = {d.split(".")[0] for d in [*renames, *renames.values(), *removed, *changed]}
+    return renames, removed, changed, rem_members, chg_members, tops
 
 
-def _mentions(node: ast.AST, names: set[str]) -> bool:
-    return any((isinstance(n, ast.Name) and n.id in names) or (isinstance(n, ast.Attribute) and n.attr in names)
-               or (isinstance(n, ast.alias) and (n.asname or n.name).split(".")[-1] in names)
-               for n in ast.walk(node))
+def _ren(d: str, renames: dict) -> str:
+    for o in sorted(renames, key=len, reverse=True):
+        if d == o or d.startswith(o + "."):
+            return renames[o] + d[len(o):]
+    return d
 
 
-def _imports(tree: ast.Module) -> Counter:
-    out: Counter = Counter()
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Import):
-            out.update(("import", a.name, a.asname) for a in n.names)
-        elif isinstance(n, ast.ImportFrom):
-            out.update((f"from {'.' * n.level}{n.module or ''}", a.name, a.asname) for a in n.names)
+def _scope_bindings(body: list) -> dict[str, str]:
+    """Import bindings of one scope (not descending into nested defs and classes)."""
+    out = {}
+    for node in _flat(body):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    out[a.asname] = a.name
+                else:
+                    out[a.name.split(".")[0]] = a.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom):
+            mod = "." * node.level + (node.module or "")
+            for a in node.names:
+                if a.name != "*":
+                    out[a.asname or a.name] = f"{mod}.{a.name}" if mod else a.name
     return out
 
 
-def _strip_imports(body: list) -> list:
-    out = []
-    for s in body:
-        if isinstance(s, (ast.Import, ast.ImportFrom)):
-            continue
-        for field in ("body", "orelse", "finalbody"):
-            if isinstance(getattr(s, field, None), list):
-                setattr(s, field, _strip_imports(getattr(s, field)))
-        for h in getattr(s, "handlers", []):
-            h.body = _strip_imports(h.body)
-        out.append(s)
+class _Normalise(ast.NodeTransformer):
+    """Replace import-bound names by ⟨target⟩ tokens (renamed with `renames`), drop imports."""
+
+    def __init__(self, renames: dict, tops: set):
+        self.renames, self.tops, self.scopes = renames, tops, []
+
+    def _tok(self, d: str) -> ast.Name:
+        return ast.Name(id=f"⟨{_ren(d, self.renames)}⟩", ctx=ast.Load())
+
+    def _lookup(self, name: str) -> str | None:
+        for sc in reversed(self.scopes):
+            if name in sc:
+                return sc[name]
+        return None
+
+    def _resolve(self, node) -> str | None:
+        if isinstance(node, ast.Name):
+            return self._lookup(node.id)
+        if isinstance(node, ast.Attribute):
+            d = self._resolve(node.value)
+            return f"{d}.{node.attr}" if d else None
+        return None
+
+    def _scoped(self, node, body):
+        self.scopes.append(_scope_bindings(body))
+        self.generic_visit(node)
+        self.scopes.pop()
+        return node
+
+    def visit_Module(self, node):
+        return self._scoped(node, node.body)
+
+    def visit_FunctionDef(self, node):
+        return self._scoped(node, node.body)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_ClassDef = visit_FunctionDef
+
+    def visit_Import(self, node):
+        return None
+
+    visit_ImportFrom = visit_Import
+
+    def visit_Name(self, node):
+        d = self._lookup(node.id)
+        return self._tok(d) if d else node
+
+    def visit_Attribute(self, node):
+        d = self._resolve(node)
+        if d:
+            return self._tok(d)
+        self.generic_visit(node)
+        return node
+
+    def visit_Constant(self, node):
+        if isinstance(node.value, str) and _DOTTED.match(node.value) and node.value.split(".")[0] in self.tops:
+            return ast.Constant(value=f"⟨{_ren(node.value, self.renames)}⟩")
+        return node
+
+    def visit_Call(self, node):
+        f = node.func
+        is_setattr = ((isinstance(f, ast.Name) and f.id == "setattr")
+                      or (isinstance(f, ast.Attribute) and f.attr in ("setattr", "delattr", "object")))
+        if is_setattr and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) \
+                and isinstance(node.args[1].value, str):
+            d = self._resolve(node.args[0])
+            if d:                                      # (module or class, "name") -> one target token
+                tok = ast.Constant(value=f"⟨{_ren(d + '.' + node.args[1].value, self.renames)}⟩")
+                node.args = [tok] + node.args[2:]
+        self.generic_visit(node)
+        return node
+
+
+def _token_targets(node: ast.AST) -> set[str]:
+    out = set()
+    for n in ast.walk(node):
+        v = n.id if isinstance(n, ast.Name) else n.value if isinstance(n, ast.Constant) and isinstance(n.value, str) else None
+        m = _TOK.match(v) if isinstance(v, str) else None
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def _hits(targets: set[str], wanted: set[str]) -> bool:
+    return any(t == w or t.startswith(w + ".") for t in targets for w in wanted)
+
+
+def _uses_removed(node, removed: set[str], members: set[str]) -> bool:
+    return _hits(_token_targets(node), removed) or any(
+        isinstance(n, ast.Attribute) and n.attr in members for n in ast.walk(node))
+
+
+class _ClearChanged(ast.NodeTransformer):
+    """Clear the arguments of calls to a changed name (they may differ between base and head)."""
+
+    def __init__(self, changed: set[str], members: set[str]):
+        self.changed, self.members, self.count = changed, members, 0
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        f = node.func
+        m = _TOK.match(f.id) if isinstance(f, ast.Name) else None
+        if (m and m.group(1) in self.changed) or (isinstance(f, ast.Attribute) and f.attr in self.members):
+            node.args, node.keywords = [], []
+            self.count += 1
+        return node
+
+
+_BLOCKS = ("body", "orelse", "finalbody")
+
+
+def _blocks(s: ast.stmt) -> list[list]:
+    out = [getattr(s, f) for f in _BLOCKS if isinstance(getattr(s, f, None), list)]
+    out += [h.body for h in getattr(s, "handlers", [])]
+    out += [c.body for c in getattr(s, "cases", [])]
     return out
 
 
 def _header(s: ast.stmt) -> str:
-    """dump of a compound statement without its blocks."""
-    c = ast.parse(ast.unparse(s)).body[0]
-    for field in ("body", "orelse", "finalbody", "handlers", "cases"):
-        if isinstance(getattr(c, field, None), list):
-            setattr(c, field, [])
+    """dump of a statement without its blocks (decorators, bases, test, handler types kept)."""
+    c = copy.deepcopy(s)
+    for f in _BLOCKS:
+        if isinstance(getattr(c, f, None), list):
+            setattr(c, f, [])
+    if hasattr(c, "handlers"):
+        c.handlers = [ast.ExceptHandler(type=h.type, name=h.name, body=[]) for h in c.handlers]
+    if hasattr(c, "cases"):
+        c.cases = [ast.match_case(pattern=k.pattern, guard=k.guard, body=[]) for k in c.cases]
     return ast.dump(c)
 
 
-def _blocks(s: ast.stmt) -> list[list]:
-    out = [getattr(s, f) for f in ("body", "orelse", "finalbody") if isinstance(getattr(s, f, None), list)]
-    out += [h.body for h in getattr(s, "handlers", [])]
-    return out
+def _leaves(s: ast.stmt) -> list:
+    blocks = _blocks(s)
+    if not blocks:
+        return [s]
+    return [x for b in blocks for y in b for x in _leaves(y)]
 
 
-def _compare_body(b: list, h: list, removed: set[str], changed: set[str], where: str) -> list[str]:
-    db, dh = [ast.dump(s) for s in b], [ast.dump(s) for s in h]
+def _trivial(s: ast.stmt) -> bool:
+    return (isinstance(s, (ast.Pass, ast.Assign, ast.AnnAssign, ast.AugAssign))
+            or (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)))
+
+
+def _deletable(s: ast.stmt, removed: set[str], members: set[str]) -> bool:
+    """A statement using a removed name; a compound one only when every leaf that is not an
+    assignment, `pass` or docstring uses a removed name (no unrelated checks go with it)."""
+    if not _blocks(s):
+        return _uses_removed(s, removed, members)
+    leaves = [x for x in _leaves(s) if not _trivial(x)]
+    return bool(leaves) and all(_uses_removed(x, removed, members) for x in leaves)
+
+
+def _first_line(s: ast.stmt) -> str:
+    return re.sub("⟨|⟩", "", ast.unparse(s).splitlines()[0])[:80]
+
+
+def _compare(b: list, h: list, removed, members, where: str, deleted: list) -> list[str]:
+    db, dh = [ast.dump(x) for x in b], [ast.dump(x) for x in h]
     out = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(a=db, b=dh, autojunk=False).get_opcodes():
         if op == "equal":
             continue
         bs, hs = b[i1:i2], h[j1:j2]
-        if op == "delete" and all(_mentions(s, removed) for s in bs):
+        keep = [x for x in bs if not _deletable(x, removed, members)]
+        gone = [x for x in bs if x not in keep]
+        if len(keep) == len(hs) and all(_blocks(x) and _header(x) == _header(y) and len(_blocks(x)) == len(_blocks(y))
+                                        for x, y in zip(keep, hs)):
+            deleted += [f"{where}:{x.lineno} {_first_line(x)}" for x in gone]
+            for x, y in zip(keep, hs):
+                for u, v in zip(_blocks(x), _blocks(y)):
+                    out += _compare(u, v, removed, members, where, deleted)
             continue
-        if op == "replace" and len(bs) != len(hs):     # deletions of removed names inside a replace
-            bs = [s for s in bs if not _mentions(s, removed)]
-            op = "delete" if not bs and not hs else op
-        if op == "replace" and len(bs) == len(hs) and all(type(x) is type(y) for x, y in zip(bs, hs)):
-            for x, y in zip(bs, hs):
-                bx, by = _blocks(x), _blocks(y)
-                if bx and _header(x) == _header(y) and len(bx) == len(by):
-                    for u, v in zip(bx, by):
-                        out += _compare_body(u, v, removed, changed, where)
-                elif not (changed and _mentions(x, changed) and _mentions(y, changed)):
-                    out.append(f"{where}:{y.lineno}: changed beyond the plan ({ast.unparse(y).splitlines()[0][:80]})")
-            continue
-        line = (hs[0].lineno if hs else bs[0].lineno)
-        out.append(f"{where}:{line}: {op} beyond the plan (only deleting statements that name a removed "
-                   f"name, or rewriting a statement that names a changed name, is allowed)")
+        line = hs[0].lineno if hs else bs[0].lineno
+        what = _first_line(hs[0]) if hs else _first_line(bs[0])
+        out.append(f"{where}:{line}: {op} beyond the plan ({what})")
     return out
 
 
 def caller_problems(plan: dict, callers: list[tuple], tb: dict, th: dict, roots) -> list[str]:
-    """A caller file may only follow the plan (see the module docstring)."""
-    names = {}                                        # bare old name -> bare new name
-    for o, n in plan["renamed"].items():
-        if ":" in o:
-            bo, bn = _split(o)[1].split(".")[-1], _split(n)[1].split(".")[-1]
-            if bo != bn:
-                names[bo] = bn
-    modules = {}
-    for o, n in plan["renamed"].items():
-        if ":" not in o:
-            mo, mn = _dotted(o, roots), _dotted(n, roots)
-            if mo and mn:
-                modules[mo] = mn
-    from_moves = {}                                   # (old module, name) -> (new module, new name)
-    for o, n in plan["renamed"].items():
-        if ":" in o:
-            (po, no), (pn, nn) = _split(o), _split(n)
-            mo, mn = _dotted(po, roots), _dotted(pn, roots)
-            if mo and mn and "." not in no:
-                from_moves[(mo, no)] = (mn, nn)
-    removed = {n.split(".")[-1] for _, n in map(_split, plan["removed"]) if n}
-    removed |= {(_dotted(p, roots) or "").split(".")[-1] for p, n in map(_split, plan["removed"]) if n is None} - {""}
-    changed = {n.split(".")[-1] for _, n in map(_split, plan["changed"])}
-    removed_mods = {_dotted(p, roots) for p, n in map(_split, plan["removed"]) if n is None} - {None}
-    out = []
+    """A caller file may only follow the plan (see above); returns the problems. Use
+    `caller_record` for what was deleted and how many calls changed."""
+    return _callers(plan, callers, tb, th, roots)[0]
+
+
+def caller_record(plan: dict, callers: list[tuple], tb: dict, th: dict, roots) -> tuple[list[str], dict]:
+    return _callers(plan, callers, tb, th, roots)
+
+
+def _callers(plan, callers, tb, th, roots):
+    renames, removed, changed, rem_m, chg_m, tops = _targets_map(plan, roots)
+    out, deleted, calls = [], [], 0
     for st, bp, hp in callers:
         if bp != hp or not bp or not hp:
             out.append(f"{hp or bp}: a caller file may not be added, deleted or renamed ({st})")
             continue
         if bp not in tb or hp not in th:
             continue
+        if "�" in tb[bp] + th[hp]:
+            out.append(f"{hp}: binary caller file may not change")
+            continue
         if not bp.endswith(".py"):
-            out += _text_problems(bp, tb[bp], th[hp], names, modules, removed, changed)
+            out += _text_problems(hp, tb[bp], th[hp], renames, plan, roots)
             continue
         try:
             tbase, thead = ast.parse(tb[bp]), ast.parse(th[hp])
         except SyntaxError:
             out.append(f"{hp}: does not parse at base or head")
             continue
-        tbase = _Rename(names, modules).visit(tbase)
-        ib, ih = _imports(tbase), _imports(thead)
-        moved: Counter = Counter()                    # the base imports as the plan moves them
-        for (kind, name, asname), c in ib.items():
-            mod = kind[5:] if kind.startswith("from ") else None
-            for (mo, no), (mn, nn) in from_moves.items():
-                if mod == _Rename({}, modules)._mod(mo) and name in (no, nn):
-                    moved[(f"from {mn}", nn, asname)] += c
-                    break
-            else:
-                if (mod in removed_mods or (mod is None and name in removed_mods)
-                        or (mod is not None and name in removed)):
-                    continue
-                moved[(kind, name, asname)] += c
-        if moved != ih:
-            extra = sorted((ih - moved) + (moved - ih))[:3]
-            out.append(f"{hp}: imports differ from the plan's renames: {extra}")
-        out += _compare_body(_strip_imports(tbase.body), _strip_imports(thead.body), removed, changed, hp)
-    return out
+        nb = _Normalise(renames, tops).visit(tbase)
+        nh = _Normalise({}, tops).visit(thead)
+        cb, ch = _ClearChanged(changed, chg_m), _ClearChanged(changed, chg_m)
+        nb, nh = cb.visit(nb), ch.visit(nh)
+        calls += ch.count
+        out += _compare(nb.body, nh.body, removed, rem_m, hp, deleted)
+    return out, {"deleted": deleted, "changed_calls": calls, "files": len(callers)}
 
 
-def _text_problems(path, base, head, names, modules, removed, changed) -> list[str]:
-    for o, n in names.items():
-        base = re.sub(rf"\b{re.escape(o)}\b", n, base)
-    for o, n in modules.items():
-        base = re.sub(rf"\b{re.escape(o)}\b", n, base)
-    out = []
+def _text_problems(path, base, head, renames, plan, roots) -> list[str]:
+    """Non-Python callers (docs, data): only the plan's renames, as dotted names, file paths and
+    bare names whose spelling changes; nothing deleted or rewritten."""
+    subs = [(o, n) for o, n in renames.items()]
+    for o, n in [*plan["renamed"].items(), *plan.get("retargeted", {}).items()]:
+        po, no = _split(o)
+        pn, nn = _split(n)
+        subs.append((po, pn))
+        if no and nn and no.split(".")[-1] != nn.split(".")[-1]:
+            subs.append((no.split(".")[-1], nn.split(".")[-1]))
+    for o, n in sorted(set(subs), key=lambda x: -len(x[0])):
+        if o != n:
+            base = re.sub(rf"(?<![\w.]){re.escape(o)}(?![\w])", n, base)
+    if base == head:
+        return []
     bl, hl = base.split("\n"), head.split("\n")
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(a=bl, b=hl, autojunk=False).get_opcodes():
-        if op == "equal":
-            continue
-
-        def has(lines, ns):
-            return all(any(re.search(rf"\b{re.escape(x)}\b", ln) for x in ns) for ln in lines)
-        if op == "delete" and removed and has(bl[i1:i2], removed):
-            continue
-        if op == "replace" and changed and has(bl[i1:i2], changed) and has(hl[j1:j2], changed):
-            continue
-        out.append(f"{path}:{j1 + 1}: {op} beyond the plan")
-    return out
+    first = next((i for i, (x, y) in enumerate(zip(bl, hl)) if x != y), min(len(bl), len(hl)))
+    return [f"{path}:{first + 1}: changed beyond the plan's renames"]

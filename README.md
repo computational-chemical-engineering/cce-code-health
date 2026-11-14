@@ -377,6 +377,7 @@ approved_by = "jane"
 reason = "ADR 0076: drop the compatibility re-exports of pkg.api"
 removed = ["src/pkg/api.py:old_solve", "src/pkg/compat.py"]     # path:Name, or a whole module
 renamed = {"src/pkg/a.py:Solver" = "src/pkg/core/solver.py:Solver", "src/pkg/b.py" = "src/pkg/core/b.py"}
+retargeted = {"src/pkg/api.py:Solver" = "src/pkg/core/solver.py:Solver"}   # re-export dropped, callers go home
 changed = ["src/pkg/run.py:run"]                                 # same name and module, new signature
 added = ["src/pkg/core/solver.py:make_solver"]                   # new names that are not renames
 new_files = ["src/pkg/core/*.py"]
@@ -400,13 +401,20 @@ in refactor mode, except:
   the old and new API text of each planned change, for review.
 - `plan`: added in-scope files match `new_files`; touched paths outside the scope or under
   `forbid` must match `callers`. Frozen paths and `.codehealth/` stay refused.
-- `callers`: each caller file may only follow the plan. After applying the renames (names,
-  attributes, modules) to its base version, it must equal its head version, except that
-  statements naming a removed name may be deleted, a statement naming a changed name may be
-  rewritten into one of the same kind that still names it (`assert run(x)` to
-  `assert run(x, report)`, not to a bare call), and imports move as the renames say. Caller
-  files may not be added, deleted or renamed (no new `conftest.py`). Non-Python callers are
-  compared line by line by the same rule.
+- `retargeted`: the name leaves the old module (a dropped re-export, no shim) while its home
+  already defines it at base, unchanged; callers move their imports to the home.
+- `callers`: each caller file may only follow the plan. Both versions are normalised: every name
+  and attribute chain bound by the file's own imports (per scope) becomes its full dotted target,
+  as do `setattr(obj, "name")`, `patch.object(obj, "name")` targets and dotted strings such as
+  `mock.patch("pkg.mod.Name")`; the plan's renames, moves and retargets are applied to the base.
+  Head must then equal base statement by statement (decorators, bases, exception types and
+  test expressions included), except that a statement using a removed name may be deleted (a
+  compound one only when every non-trivial statement in it uses one) and the arguments of a
+  call to a changed name may differ. Caller files may not be added, deleted or renamed (no new
+  `conftest.py`); binary caller files may not change; non-Python callers may only take the
+  renames. The check's JSON entry `callers` lists every deleted statement and the number of
+  changed calls. Not supported (rejected, rewrite by hand outside the gate): deleting a helper
+  together with a removed test, star imports that hide a renamed name.
 - `literals`: the `__all__` elements of the files the plan names are left to `public_api`.
 `codehealth log` records class `interface`; accepted needs all checks ok and needs no debt drop
 (debt may still not rise). With `[docs] docstrings = true`, a renamed undocumented name counts
