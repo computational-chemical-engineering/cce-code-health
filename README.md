@@ -136,9 +136,16 @@ codehealth gate --base step-n --ref-base campaign-start --mode optimize  # tiers
 codehealth config --check                      # validate .codehealth/config.toml
 ```
 
+At campaign cadence, paths that only docs/config commits touched since the base (commits that
+touch no in-scope file: the playbook commit, the run-log copy, a docs-debt fix, a restructure
+plan) pass `scope` and `forbid`, with a note; each step was gated on its own. Frozen paths and
+uncommitted changes are never excused.
+
 Static rules (frozen files, forbidden paths with `.codehealth/*` always forbidden, every
 touched path in scope, string literals, public API including decorators, dunder methods,
-module constants, `__all__`, re-exports and class fields, debt may not rise) and
+module constants, `__all__`, re-exports and class fields, debt may not rise, no touched file
+newly crosses a file-size or duplication threshold; a new brain function is noted, not failed)
+and
 repo-supplied tiers from `[gate]` in the base's config: `command` (exit code), `reference`
 (outputs at head vs base; base run twice for determinism; bitwise in refactor mode,
 `tolerance = {rel, abs, ulp}` in optimize mode; `.npy` shape and dtype must match, integers

@@ -325,8 +325,25 @@ def base_tree(repo: Path, sha: str, keep: tuple = ()) -> Path:
     return tree
 
 
+def docs_only_paths(repo: Path, base: str, cfg: config.Config) -> set[str]:
+    """Paths that only docs/config commits touched since base: every commit in base..HEAD that
+    touches the path touches no in-scope file, and the working tree does not change it. At
+    campaign cadence such paths (the playbook commit, the run-log copy, a docs-debt fix, a
+    restructure plan) pass `scope` and `forbid`: each step was gated alone."""
+    out = gitio.git(repo, "log", "--format=%x00%H", "--name-only", "--no-renames", f"{base}..HEAD").decode()
+    step_paths, seen = set(), set()
+    for block in out.split("\x00")[1:]:
+        files = [ln for ln in block.splitlines()[1:] if ln.strip()]
+        seen.update(files)
+        if any(cfg.in_scope(f) for f in files):
+            step_paths.update(files)
+    dirty = {ln[3:] for ln in gitio.git(repo, "status", "--porcelain", "--no-renames",
+                                        "--untracked-files=all").decode().splitlines() if len(ln) > 3}
+    return seen - step_paths - dirty
+
+
 def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: bool = False,
-                  plan: dict | None = None) -> list[Check]:
+                  plan: dict | None = None, cadence: str = "step") -> list[Check]:
     """Static rules; with `plan` (restructure or interface mode, `plan["kind"]`) the `plan`
     check is added and `public_api` follows that mode's rule."""
     from . import architecture, interface, restructure  # noqa: PLC0415
@@ -348,11 +365,15 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
     hit = sorted(p for p in touched if _match(p, frozen))
     checks.append(Check("frozen", not hit, ", ".join(hit[:10]) + note))
     callers = interface.exempt(plan) if iface else []          # interface plan: callers may follow
-    hit = sorted(p for p in touched if (_match(p, list(g.get("forbid", []))) and not _match(p, callers))
-                 or _match(p, [".codehealth/*"]))
-    checks.append(Check("forbid", not hit, ", ".join(hit[:10])))
-    hit = sorted(p for p in touched if not cfg.in_scope(p) and not _match(p, callers))
-    checks.append(Check("scope", not hit, "out of scope: " + ", ".join(hit[:10]) if hit else ""))
+    docs_only = docs_only_paths(repo, base, cfg) - set(hit) if cadence == "campaign" else set()
+    hit = sorted(p for p in touched if ((_match(p, list(g.get("forbid", []))) and not _match(p, callers))
+                                        or _match(p, [".codehealth/*"])) and p not in docs_only)
+    excused = sorted(p for p in touched if p in docs_only
+                     and (_match(p, list(g.get("forbid", [])) + [".codehealth/*"]) or not cfg.in_scope(p)))
+    note = f" [campaign: {len(excused)} path(s) touched only by docs/config commits]" if excused else ""
+    checks.append(Check("forbid", not hit, ", ".join(hit[:10]) + note))
+    hit = sorted(p for p in touched if not cfg.in_scope(p) and not _match(p, callers) and p not in docs_only)
+    checks.append(Check("scope", not hit, ("out of scope: " + ", ".join(hit[:10]) if hit else "") + note))
     if iface:
         hit = interface.plan_problems(plan, changes, cfg, list(g.get("forbid", [])))
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
@@ -1206,8 +1227,22 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     db = sum(r["debt"] for r in rb.values())
     dh = sum(r["debt"] for r in rh.values())
     errors = new_errors(rb, rh, changes)
+    # a file that crosses a file-size or duplication threshold fails here, at the step that
+    # caused it, as `codehealth diff` fails it over the branch (a later step cannot undo it
+    # without a restructure)
+    counterpart = {h: b for _, b, h in changes if h}
+    for path, r in sorted(rh.items()):
+        old = rb.get(counterpart.get(path) or "")
+        new = sorted(set(r["file_smells"]) - set(old["file_smells"] if old else []))
+        if new:
+            errors.append(f"{path}: new file smell(s) {', '.join(new)} (nloc {r['nloc']})")
+    base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
+    brains = sorted(f"{r['path']}::{f['name']}" for r in rh.values() for f in r["functions"]
+                    if f["brain"] and f["name"] not in base_brains)
+    note = [f"new brain function(s): {', '.join(brains[:3])} (an intermediate; the milestone must "
+            f"bring the count back)"] if brains else []
     return (Check("debt", dh <= db + 1e-9 and not errors,
-                  "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3])), db, dh)
+                  "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3] + note)), db, dh)
 
 
 def _git_rc(repo: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -1319,7 +1354,8 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         debt.ok = True
         debt.detail += " (rise allowed: exact revert)"
         extra = [revert_check(repo, base, revert, head_tree or gitio.worktree_tree(repo))]
-    static = static_checks(repo, base, cfg, changes, trial=config_override is not None, plan=plan_data)
+    static = static_checks(repo, base, cfg, changes, trial=config_override is not None, plan=plan_data,
+                           cadence=cadence)
     for c in static:
         if revert and c.name == "architecture" and not c.ok:
             c.ok = True

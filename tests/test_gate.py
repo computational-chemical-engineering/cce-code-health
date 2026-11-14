@@ -1,3 +1,5 @@
+import json
+import subprocess
 import sys
 
 import pytest
@@ -232,3 +234,33 @@ def test_debt_fails_when_analysis_newly_errors(repo, capsys, monkeypatch):
     assert "FAIL debt" in out and "pkg/mod.py: analysis error: complexipy: boom" in out
     assert main(["diff", "--repo", str(repo)]) == 1
     assert "FAIL pkg/mod.py: analysis error: complexipy: boom" in capsys.readouterr().out
+
+
+def test_step_crossing_file_threshold_fails(repo, capsys):
+    edit(repo, "pkg/big.py", "".join(f"_x{i} = {i}\n" for i in range(1100)))
+    assert gate(repo) == 1
+    out = capsys.readouterr().out
+    assert "FAIL debt" in out and "pkg/big.py: new file smell(s) large_file (nloc 1100)" in out
+
+
+def test_campaign_cadence_excuses_docs_only_commits(repo, capsys):
+    edit(repo, "pkg/mod.py", MOD.replace("return x * 3 + 1", "return _triple(x) + 1")
+         + "\n\ndef _triple(x):\n    return 3 * x\n")
+    git(repo, "commit", "-qam", "refactor step")
+    base = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD~1"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    (repo / ".codehealth/playbook.md").write_text("# playbook\n")
+    (repo / "docs").mkdir()
+    (repo / "docs/notes.md").write_text("notes\n")
+    git(repo, "add", ".codehealth/playbook.md", "docs/notes.md")
+    git(repo, "commit", "-qm", "docs: playbook")
+    assert gate(repo, "--base", base) == 1                           # step cadence: refused
+    capsys.readouterr()
+    assert gate(repo, "--base", base, "--cadence", "campaign", "--json", str(repo.parent / "camp.json")) in (0, 1)
+    checks = {c["name"]: c for c in json.loads((repo.parent / "camp.json").read_text())["checks"]}
+    assert checks["forbid"]["ok"] and checks["scope"]["ok"]
+    assert "2 path(s) touched only by docs/config commits" in checks["forbid"]["detail"]
+    (repo / "docs/notes.md").write_text("changed in the worktree\n")  # not committed: not excused
+    assert gate(repo, "--base", base, "--cadence", "campaign", "--json", str(repo.parent / "camp.json")) == 1
+    checks = {c["name"]: c for c in json.loads((repo.parent / "camp.json").read_text())["checks"]}
+    assert not checks["scope"]["ok"] and "docs/notes.md" in checks["scope"]["detail"]
