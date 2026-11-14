@@ -81,6 +81,17 @@ campaign is one of its work packages and follows those rules.
    `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it
    to `.codehealth/runs/<id>.jsonl` in a separate docs commit.
 
+## Relocation and milestones
+
+A step may lower a function's debt mostly by moving it into a new helper: the LOG line then
+says `N% of it relocated` (record `target_debt.relocated`, with the new functions in
+`new_in_file`). Above about 80 % the step is an intermediate, not a gain: say so in the log
+(`--hypothesis`) and plan the follow-up that brings the new helper under the brain
+thresholds. Close a milestone (a work order, a group of steps) only when, besides debt, the
+number of brain functions in scope (`codehealth scan`) is back to at most its value at the
+milestone's start. Peclet dem S3/S4: three relocating steps raised brain functions 12 -> 15;
+this exit rule forced the follow-up, which brought the count back to 12 in 5 steps.
+
 ## Docs debt (repos with a `[docs]` table)
 
 A step never edits docs (scope). The gate's `docs` check warns when a step makes a doc

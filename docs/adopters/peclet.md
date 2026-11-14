@@ -155,3 +155,10 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
   would need run-to-run envelopes per scenario and is weak for chaotic scenes.
 - S3 end: dem debt 1784.6, brain 12 -> 15, health 5.49 -> 4.98 (relocation 95-99 %). S4
   (WO-5) splits stabilizeVelocityPhase by mode, each helper under CCN 25 / NLOC 70, pin 00b1849.
+- S4 closed at de67b0b: brain 12 (exit rule met), debt 1693.5, health 5.08. WO-6: 0a31e05
+  solveVelocityPhase 32.4 -> 23.7; 68c567d solvePositionPhase 39.8 -> 17.1 (62 % relocated into
+  runOverlapProjection 14.0); de67b0b demSolveContacts 95.1 -> 87.7. CUDA check at bab8b36 and
+  de67b0b: ctest 303/303, envelope ratio <= 1.13 and <= 1.05 (criterion 1.5x fixed in advance).
+  The rest of demSolveContacts holds `[&]` host lambdas and locals used later: needs a design.
+  Brain-count exit rule now in the refactor-loop skill. S5 (WO-7): dedup of 4 colouring brain
+  functions, step 0 classifies the pair diff; GPU bench (ABBA) added to the device check.
