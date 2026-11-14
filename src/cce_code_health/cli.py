@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import re
 import sys
@@ -74,6 +75,21 @@ def totals(reports: dict[str, dict]) -> dict:
             "errors": sum(r["error"] is not None for r in reports.values())}
 
 
+SCAN_SCHEMA = 1     # scan JSON layout, documented in README "Scan JSON"; bumped on any breaking change
+
+
+def group_totals(reports: dict[str, dict], depth: int) -> dict[str, dict]:
+    """totals() per directory prefix of `depth` path components (a file in a shallower
+    directory is grouped under its own directory)."""
+    if depth < 1:
+        raise ValueError("--group-depth must be >= 1")
+    by: dict[str, dict] = {}
+    for path, r in reports.items():
+        parts = path.split("/")[:-1]
+        by.setdefault("/".join(parts[:depth]) or ".", {})[path] = r
+    return {g: totals(rs) for g, rs in sorted(by.items())}
+
+
 def meta(repo: Path, cfg: config.Config, **extra) -> dict:
     langs = {"profiles": {k: p.name for k, p in cfg.other_profiles.items()}} if cfg.other_profiles else {}
     return {"tool": "cce-code-health", "version": __version__, "profile": cfg.profile.name, **langs,
@@ -92,10 +108,18 @@ def cmd_scan(a) -> int:
     cfg = _load(a, repo, ref)
     reports = analyze_ref(repo, ref, cfg)
     t = totals(reports)
-    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), "totals": t, "files": reports})
+    groups = group_totals(reports, a.group_depth) if a.group_depth else None
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree", schema=SCAN_SCHEMA), "totals": t,
+                        "files": reports, **({"groups": groups} if groups is not None else {})})
     print(f"{'file':60} {'nloc':>6} {'debt':>8} {'health':>6}  file smells")
     for r in sorted(reports.values(), key=lambda r: -r["debt"])[:a.top]:
         print(f"{r['path'][-60:]:60} {r['nloc']:6} {r['debt']:8.1f} {r['health']:6.1f}  {','.join(r['file_smells'])}")
+    if groups is not None:
+        print(f"\n{'group (depth ' + str(a.group_depth) + ')':60} {'nloc':>6} {'debt':>8} {'health':>6} "
+              f"{'files':>5} {'brain':>5}")
+        for g, x in sorted(groups.items(), key=lambda kv: -kv[1]["debt"]):
+            print(f"{g[-60:]:60} {x['nloc']:6} {x['debt']:8.1f} {x['health']:6.1f} {x['files']:5} "
+                  f"{x['brain_functions']:5}")
     print(f"SCAN {repo.name}@{(ref or 'worktree')[:10]} profile={cfg.label()}: "
           f"{t['files']} files, {t['nloc']} NLOC, debt {t['debt']} ({t['debt_per_kloc']}/kNLOC), "
           f"health {t['health']}, functions with debt {t['functions_with_debt']}/{t['functions']}, "
@@ -178,16 +202,34 @@ def cmd_diff(a) -> int:
 def cmd_arch(a) -> int:
     repo = Path(a.repo).resolve()
     ref = gitio.rev(repo, a.ref) if a.ref else None
-    cfg = config.load(repo, ref)
+    cfg = _load(a, repo, ref)
+    if a.depth is not None:
+        if a.depth < 1:
+            raise ValueError("--depth must be >= 1")
+        if cfg.architecture:
+            cfg.architecture = {**cfg.architecture, "cycle_depth": a.depth}
     res = architecture.analyse(repo, ref, cfg)
     if res is None:
         raise ValueError(f"{cfg.source}: no [architecture] table")
-    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), **architecture.to_json(res)})
+    depth = cfg.architecture.get("cycle_depth", 2)
+    edges = architecture.edge_counts(res, depth) if a.edges else None
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree", depth=depth),
+                        **architecture.to_json(res),
+                        **({"edges": [{"from": x, "to": y, "n": n} for x, y, n in edges]}
+                           if edges is not None else {})})
     print("\n".join(architecture.report_lines(res)))
+    if edges is not None:
+        both = {(x, y) for x, y, _ in edges} & {(y, x) for x, y, _ in edges}
+        print(f"  module edges between groups at depth {depth} (* = both directions):")
+        for x, y, n in edges[:a.top]:
+            print(f"    {n:5}  {x} -> {y}{'  *' if (x, y) in both else ''}")
     for w in res.warnings:
         print(f"  WARNING {w}")
-    print(f"ARCH {repo.name}@{(ref or 'worktree')[:10]}: {res.files} files, {len(res.imports)} imports, "
-          f"{len(res.violations)} violation(s), {len(res.cycles)} cycle(s)")
+    big = max((len(c["nodes"]) for c in res.cycles), default=0)
+    print(f"ARCH {repo.name}@{(ref or 'worktree')[:10]}{' (trial)' if a.trial_config else ''}: "
+          f"{res.files} files, {len(res.imports)} imports, "
+          f"{len(res.violations)} violation(s), {len(res.cycles)} cycle(s) at depth {depth}"
+          + (f" (largest {big} nodes, {sum(len(c['edges']) for c in res.cycles)} cycle edges)" if big else ""))
     return 0
 
 
@@ -435,6 +477,14 @@ def target_debt(target: str, fd: dict | None, renames: dict[str, str] | None = N
             "relocated": round(min(sum(new.values()) / drop, 9.99), 2) if drop > EPS else None}
 
 
+def _branch(repo: Path) -> str | None:
+    """The worktree's branch (None when detached)."""
+    try:
+        return gitio.git(repo, "symbolic-ref", "--short", "-q", "HEAD").decode().strip() or None
+    except gitio.GitError:
+        return None
+
+
 def cmd_log(a) -> int:
     repo = Path(a.repo).resolve()
     gj = Path(a.gate_json).resolve()
@@ -450,6 +500,15 @@ def cmd_log(a) -> int:
     elif a.head:
         raise ValueError(f"--head is only for kept results ({', '.join(KEPT)}) and committed reverts")
     out = (Path(a.out) if a.out else gatemod._common_dir(repo) / "runs" / f"{a.campaign}.jsonl").resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # one log per clone, shared by all its worktrees: engineers on parallel branches append to the
+    # same file, so the read-number-append below holds an exclusive lock
+    with open(out.with_name(out.name + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha)
+
+
+def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
     lines = [ln for ln in out.read_text().splitlines() if ln.strip()] if out.is_file() else []
     for ln in lines:
         old = json.loads(ln)
@@ -465,9 +524,8 @@ def cmd_log(a) -> int:
            "target_debt": target_debt(a.target, m.get("function_debt")),
            "hypothesis": a.hypothesis, "reverts": reverts, "checks": {c["name"]: c["ok"] for c in checks},
            "details": {c["name"]: c.get("detail", "") for c in checks},
-           "gate_json": str(gj),
+           "gate_json": str(gj), "branch": _branch(repo),
            "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
     td = rec["target_debt"] or {}
@@ -512,8 +570,8 @@ def main(argv: list[str] | None = None) -> int:
         p.set_defaults(fn=fn)
         p.add_argument("--repo", default=".")
         p.add_argument("--json", help="write the full report to this file")
-        if name in ("scan", "hotspots"):
-            p.add_argument("--top", type=int, default=20)
+        if name in ("scan", "hotspots", "arch"):
+            p.add_argument("--top", type=int, default=20 if name != "arch" else 50)
             p.add_argument("--config", dest="trial_config",
                            help="read-only trial: use this config file instead of the repo's")
     pk = sub.add_parser("coupling", help="change coupling: files that change together in history")
@@ -564,6 +622,14 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")
     sub.choices["scan"].add_argument("--ref", help="commit to scan (default: working tree)")
     sub.choices["arch"].add_argument("--ref", help="commit to analyse (default: working tree)")
+    sub.choices["arch"].add_argument("--depth", type=int,
+                                     help="group modules by this many dotted components for cycles and "
+                                          "--edges (overrides cycle_depth; a large value = module level)")
+    sub.choices["arch"].add_argument("--edges", action="store_true",
+                                     help="also list the counts of module edges between groups at the depth")
+    sub.choices["scan"].add_argument("--group-depth", type=int,
+                                     help="also aggregate debt, NLOC and health per directory prefix of this "
+                                          "many path components")
     sub.choices["diff"].add_argument("--base", default="HEAD",
                                      help="base ref; its merge-base with head is used (default HEAD)")
     sub.choices["diff"].add_argument("--head", help="head ref (default: working tree)")

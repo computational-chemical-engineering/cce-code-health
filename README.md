@@ -27,7 +27,17 @@ codehealth hotspots --top 20         # rank files by commits x debt (follows ren
 ```
 
 Every command prints a one-line summary and can write the full report with `--json FILE`.
-Exit codes: 0 pass, 1 regression, 2 tool error.
+Exit codes: 0 pass, 1 regression, 2 tool error. `scan`, `hotspots`, `coupling` and `arch` take
+`--config FILE` for a read-only trial with another config (nothing in the repo changes).
+`scan --group-depth N` adds debt, NLOC, health, files and brain functions per directory prefix of
+N path components (text table and JSON `groups`).
+
+**Scan JSON** (`meta.schema` = 1; bumped on a breaking change): `meta` {tool, version, profile,
+profiles, config, repo, ref, schema}; `totals` {files, functions, nloc, debt, debt_per_kloc,
+health, functions_with_debt, brain_functions, file_smells, errors}; `files`, an object keyed by
+path, each {path, nloc, error, debt, file_smells, dup_fraction, health, functions, classes, ...};
+`functions` a list of {name, qualname, line, end_line, nloc, <profile metrics>, debt, debt_parts,
+brain}; `groups` (with `--group-depth`) an object keyed by prefix with the `totals` fields.
 
 **Debt** is the quantity that is gated: per function, the weighted excess over thresholds
 for cognitive complexity, lines of code, nesting, bumpy road, parameters and boolean
@@ -190,6 +200,9 @@ accepted-neutral --reason <why>` records a kept refactor or restructure step wit
 example names and docstrings from review notes): the gate JSON must come from a run without
 `--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
 and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
+The run log is one file per clone (`--git-common-dir`), shared by all its worktrees: engineers on
+parallel branches in worktrees of one clone append to the same log under a file lock, and each
+record carries `branch`. Separate clones keep separate logs.
 For results other than accepted, `head_sha` is `meta.head` when it is a sha (a committed step that
 failed keeps its evidence), else null. Debt in the gate is per touched file; for a function
 target (`path::name`) the record also carries `target_debt`: the function's own debt before and
@@ -299,7 +312,13 @@ reason = "domain code has no I/O"
 
 ```bash
 codehealth arch [--ref REF] [--json FILE]   # report violations by rule, and import cycles
+codehealth arch --config trial.toml --depth 9 --edges   # design a layer order: module-level SCCs
 ```
+
+`--depth N` overrides `cycle_depth` (a large value gives module-level cycles); `--edges` adds the
+counts of distinct module-to-module imports between the groups at that depth (`*` marks pairs
+present in both directions; JSON `edges`). A table with only `roots` (no rules) reports cycles
+and edges, for designing a layer order before writing one.
 
 "a.b" matches a.b and a.b.*. Imports are read from every in-scope .py file under a root, at any
 nesting level; relative imports are resolved and `from pkg import name` counts as `pkg.name` when

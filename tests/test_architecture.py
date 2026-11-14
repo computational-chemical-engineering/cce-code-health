@@ -215,3 +215,29 @@ def test_restructure_moves_grandfathered_violation(tmp_path, capsys):
     (repo / "pkg/__init__.py").write_text("import tests\n")      # a fresh violation still fails
     assert main(["gate", "--repo", str(repo), "--log", log, "--mode", "restructure", "--plan", PLAN_PATH]) == 1
     assert "new architecture violation: no-tests: pkg -> tests" in capsys.readouterr().out
+
+
+def test_edge_counts_by_depth():
+    from cce_code_health.architecture import edge_counts
+    res = analyse_texts({"src/pkg/a/x.py": "from pkg.b import y\nimport pkg.b.v\n",
+                         "src/pkg/a/u.py": "import pkg.b.y\n", "src/pkg/b/y.py": "import pkg.a.x\n",
+                         "src/pkg/b/v.py": "", "src/pkg/c/z.py": "import os\n"}, {"roots": ["src"]})
+    assert edge_counts(res, 2) == [("pkg.a", "pkg.b", 3), ("pkg.b", "pkg.a", 1)]
+    assert edge_counts(res, 1) == []
+
+
+def test_arch_trial_config_depth_and_edges(repo, tmp_path, capsys):
+    commit(repo, {"src/pkg/app/ui.py": "from pkg.domain import model\n"})
+    (repo / "src/pkg/domain/model.py").write_text("def f():\n    from pkg.app import ui\n")
+    trial = tmp_path / "trial.toml"
+    trial.write_text('schema = 1\n[scope]\ninclude = ["src/*"]\n[architecture]\nroots = ["src"]\n')
+    out_json = tmp_path / "t.json"
+    assert main(["arch", "--repo", str(repo), "--config", str(trial), "--depth", "9", "--edges",
+                 "--json", str(out_json)]) == 0
+    out = capsys.readouterr().out
+    assert "violation" not in out.split("ARCH")[0]                    # trial has no rules
+    assert "cycle pkg.app.ui <-> pkg.domain.model:" in out
+    assert "1  pkg.app.ui -> pkg.domain.model  *" in out
+    assert "(trial): " in out and "1 cycle(s) at depth 9 (largest 2 nodes, 2 cycle edges)" in out
+    data = json.loads(out_json.read_text())
+    assert data["meta"]["depth"] == 9 and {"from": "pkg.domain.model", "to": "pkg.app.ui", "n": 1} in data["edges"]

@@ -380,6 +380,21 @@ def compare_refs(repo: Path, base: str, head: str | None, cfg: config.Config,
     return (*ratchet(before, after, moved_to), after.warnings)
 
 
+def edge_counts(res: Result, depth: int) -> list[tuple[str, str, int]]:
+    """Distinct module-to-module imports between in-repo groups, modules cut to `depth` dotted
+    components (1: top-level packages): [(from, to, n)], most edges first. For designing a layer
+    order: a pair present in both directions is a cycle at that depth."""
+    tops = {imp.importer.split(".")[0] for imp in res.imports}
+    cut = lambda m: ".".join(m.split(".")[:depth])  # noqa: E731
+    pairs = {(imp.importer, imp.imported) for imp in res.imports if imp.imported.split(".")[0] in tops}
+    counts: dict[tuple[str, str], int] = {}
+    for a, b in pairs:
+        ka, kb = cut(a), cut(b)
+        if ka != kb:
+            counts[(ka, kb)] = counts.get((ka, kb), 0) + 1
+    return sorted(((a, b, n) for (a, b), n in counts.items()), key=lambda x: (-x[2], x[0], x[1]))
+
+
 def to_json(res: Result) -> dict:
     return {"files": res.files, "imports": len(res.imports),
             "violations": [{"rule": r, "kind": res.kinds.get(r), "importer": a, "imported": b,

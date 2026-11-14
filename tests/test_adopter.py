@@ -333,3 +333,36 @@ def test_log_reason_refused_for_inferred_accept(drepo, capsys):
     git(drepo, "commit", "-qm", "step")
     assert log(drepo, "g.json", "--reason", "x") == 2
     assert "--reason is only for" in capsys.readouterr().err
+
+
+def test_scan_group_depth(drepo, capsys, tmp_path):
+    (drepo / "pkg/sub").mkdir()
+    (drepo / "pkg/sub/q.py").write_text(params(9))
+    out_json = tmp_path / "s.json"
+    assert main(["scan", "--repo", str(drepo), "--group-depth", "2", "--json", str(out_json)]) == 0
+    data = json.loads(out_json.read_text())
+    assert data["meta"]["schema"] == 1 and isinstance(data["files"], dict)
+    assert set(data["groups"]) == {"pkg", "pkg/sub"}
+    assert data["groups"]["pkg/sub"]["debt"] == 4.0 and data["groups"]["pkg/sub"]["files"] == 1
+    assert "group (depth 2)" in capsys.readouterr().out
+
+
+def test_log_shared_across_worktrees_with_branch(drepo, capsys, tmp_path):
+    edit(drepo, "pkg/p.py", params(8))
+    gjson(drepo)
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    base = sha(drepo)
+    assert log(drepo, "g.json") == 0
+    wt = tmp_path / "wt2"
+    git(drepo, "worktree", "add", "-q", "-b", "eng2", str(wt), "HEAD~1")
+    (wt / "pkg/p.py").write_text(params(7))
+    rc = main(["gate", "--repo", str(wt), "--json", str(tmp_path / "g2.json")])
+    assert rc == 0
+    git(wt, "add", "-A")
+    git(wt, "commit", "-qm", "step2")
+    assert main(["log", "--repo", str(wt), "--gate-json", str(tmp_path / "g2.json"), "--campaign", "c1",
+                 "--target", "pkg/p.py::f", "--recipe", "r1"]) == 0
+    recs = [json.loads(x) for x in (drepo / ".git/codehealth/runs/c1.jsonl").read_text().splitlines()]
+    assert [r["step"] for r in recs] == [1, 2] and recs[1]["branch"] == "eng2"
+    assert recs[0]["head_sha"] == base and isinstance(recs[0]["branch"], str)
