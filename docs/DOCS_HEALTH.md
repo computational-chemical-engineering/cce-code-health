@@ -131,8 +131,15 @@ targets, class members in `if`/`try`, in-module bases followed and `object` igno
 python root first; trees closed in `finally`; D1/D2 cross-file grandfathering only for names
 that left their base file.
 
+## 5. Staleness from history (built 2026-11-14)
+
+`codehealth docs --stale` (docs_stale.py): per living doc, commits to its referenced code and
+data files since the doc's last commit, plus unreferenced co-change partners changed since;
+`diff` adds co-change review rows. Doc-to-doc references are not counted (a spec pointing at a
+busy state file is not stale code-wise; the first trial on OpenFlowsheet was dominated by them).
+
 ## Later
 
-Staleness via co-change (docs vs code), a docs-sync review lane fed by "docs to review", size
+A docs-sync review lane fed by "docs to review", size
 and duplication budget for agent docs, exemplars with a strict ratchet, CLI-flag and
 config-key vocabularies, C++ D1/D2 and names.

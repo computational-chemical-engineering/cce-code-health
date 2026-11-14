@@ -424,7 +424,17 @@ as new for D1: document it in the same step.
 
 ```bash
 codehealth docs --stats            # references per docs class, kind, status and reason
+codehealth docs --stale            # living docs whose referenced or co-changing code moved on
 ```
+
+`docs --stale` ranks living docs (records excluded) by the commits that changed their
+referenced code and data files after the doc's own last commit (paths, anchors, test ids, and
+Python names resolved to their module; references to other docs are not counted), and lists
+co-change partners: files that historically change with the doc (`--min-shared` 3 commits,
+`--min-degree` 0.5) and changed since, without being referenced. History follows renames and
+skips merges and commits of more than 30 files. `codehealth diff` adds informational
+`review <doc> (changes with <file> ...)` rows when a co-change partner is touched and the doc is
+not. OpenFlowsheet (1,000+ commits, 760 docs): 2.9 s.
 
 An optional `[docs]` table (design and measurements: docs/DOCS_HEALTH.md) checks that
 documentation for humans and agents (README, docs/, CLAUDE.md, .claude/, notebooks) still

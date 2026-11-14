@@ -181,6 +181,15 @@ def cmd_diff(a) -> int:
         failures += doc_res.failures
         rows += [f"  WARNING {w}" for w in doc_res.warnings]
         rows += [f"  review {d} (references {t}, changed here)" for d, t in sorted(set(doc_res.review))[:20]]
+        from . import docs_stale  # noqa: PLC0415
+        touched = {p for _, bp, hp in gitio.changes(repo, base, head) for p in (bp, hp) if p}
+        co = docs_stale.cochange_review(repo, cfg, touched, [x for x in gitio.ls_files(repo, head)
+                                                             if docsmod.is_doc(x, cfg.docs)])
+        reviewed = {d for d, _ in doc_res.review}
+        co = [c for c in co if c[0] not in reviewed]
+        rows += [f"  review {d} (changes with {f} in {n} commits, degree {g}; {f} changed here)"
+                 for d, f, n, g in co[:10]]
+        doc_res.notes.extend(f"co-change review: {d} with {f} ({n} shared, degree {g})" for d, f, n, g in co)
     ds = docstrings.compare_refs(repo, base, head, cfg, gitio.changes(repo, base, head))
     failures += ds or []
     write_json(a.json, {"meta": meta(repo, cfg, base=base, head=head or "worktree"),
@@ -233,11 +242,33 @@ def cmd_arch(a) -> int:
     return 0
 
 
+def cmd_docs_stale(a, repo: Path, cfg) -> int:
+    from . import docs_stale  # noqa: PLC0415
+    if not cfg.docs:
+        raise ValueError(f"{cfg.source}: no [docs] table")
+    rows = docs_stale.stale_docs(repo, cfg, min_shared=a.min_shared, min_degree=a.min_degree)
+    write_json(a.json, {"meta": meta(repo, cfg, ref="worktree", min_shared=a.min_shared,
+                                     min_degree=a.min_degree), "stale": rows})
+    print(f"{'doc':56} {'ref commits':>11} {'co-change':>9}  most changed")
+    for r in rows[:a.top]:
+        top = list(r["referenced"].items())[:2] + [(f, v["commits_since"]) for f, v in list(r["cochange"].items())[:1]]
+        co = sum(v["commits_since"] for v in r["cochange"].values())
+        print(f"{r['doc'][-56:]:56} {r['referenced_commits_since']:11} {co:9}  "
+              + ", ".join(f"{f} ({n})" for f, n in top))
+    print(f"DOCS-STALE {repo.name}: {len(rows)} living doc(s) whose referenced or co-changing files "
+          f"changed after the doc's last commit")
+    return 0
+
+
 def cmd_docs(a) -> int:
     from . import docs as docsmod  # noqa: PLC0415
     repo = Path(a.repo).resolve()
     ref = gitio.rev(repo, a.ref) if a.ref else None
     cfg = _load(a, repo, ref)
+    if a.stale:
+        if ref:
+            raise ValueError("--stale works on the working tree and full history (no --ref)")
+        return cmd_docs_stale(a, repo, cfg)
     res = docsmod.analyse(repo, ref, cfg)
     if res is None:
         raise ValueError(f"{cfg.source}: no [docs] table")
@@ -613,7 +644,12 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--json", help="write the full report to this file")
     pd.add_argument("--ref", help="commit to analyse (default: working tree)")
     pd.add_argument("--stats", action="store_true", help="counts per docs class, kind, status and reason")
-    pd.add_argument("--top", type=int, default=30, help="broken references to list (living docs)")
+    pd.add_argument("--top", type=int, default=30, help="broken references (or --stale docs) to list")
+    pd.add_argument("--stale", action="store_true",
+                    help="rank living docs by commits to their referenced and co-changing files since the "
+                         "doc's last change")
+    pd.add_argument("--min-shared", type=int, default=3, help="--stale co-change: min shared commits (default 3)")
+    pd.add_argument("--min-degree", type=float, default=0.5, help="--stale co-change: min degree (default 0.5)")
     pd.add_argument("--config", dest="trial_config",
                     help="read-only trial: use this config file instead of the repo's")
     pc = sub.add_parser("config", help="validate the gate configuration")
