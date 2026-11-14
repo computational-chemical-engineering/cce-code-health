@@ -189,6 +189,42 @@ def test_log_accepted_flow(drepo, capsys):
     assert len(out.read_text().splitlines()) == 1
 
 
+def test_log_rerun_of_flaky_gate_fail(tmp_path, capsys):
+    flag = tmp_path.parent / f"{tmp_path.name}-flaky"
+    cfg = f"""schema = 1
+[scope]
+include = ["pkg/*"]
+[[gate.tier]]
+name = "walltime"
+cmd = "test ! -e {flag}"
+"""
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".codehealth/config.toml": cfg, "pkg/p.py": params(9)})
+    edit(tmp_path, "pkg/p.py", params(8))
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "step")
+    flag.write_text("")
+    assert gjson(tmp_path, "--base", "HEAD~1", name="g1.json")[0] == 1
+    assert log(tmp_path, "g1.json") == 0                         # step 1 gate-fail (flaky tier)
+    flag.unlink()
+    assert gjson(tmp_path, "--base", "HEAD~1", name="g2.json")[0] == 0
+    assert log(tmp_path, "g2.json") == 2
+    assert "--rerun-of 1 --reason" in capsys.readouterr().err
+    assert log(tmp_path, "g2.json", "--rerun-of", "1") == 2       # needs a reason
+    assert log(tmp_path, "g2.json", "--rerun-of", "2", "--reason", "flaky") == 2
+    assert log(tmp_path, "g1.json", "--rerun-of", "1", "--reason", "flaky") == 2   # same JSON again
+    capsys.readouterr()
+    assert log(tmp_path, "g2.json", "--rerun-of", "1", "--reason", "walltime flaky under load") == 0
+    recs = [json.loads(x) for x in (tmp_path / ".git/codehealth/runs/c1.jsonl").read_text().splitlines()]
+    assert [r["result"] for r in recs] == ["gate-fail", "accepted"]
+    assert recs[1]["rerun_of"] == 1 and recs[1]["prior_gate_json"] == [str(tmp_path.parent / "g1.json")]
+    assert recs[1]["reason"] == "walltime flaky under load"
+    assert log(tmp_path, "g2.json", "--rerun-of", "2", "--reason", "x") == 2     # accepted: no more re-runs
+    from cce_code_health.stats import recipe_stats
+    st = recipe_stats(recs)["r1"]
+    assert (st["tries"], st["accepted"], st["gate_fail"], st["reruns"]) == (1, 1, 0, 1)
+
+
 def test_log_gate_fail_inferred_and_no_gain(drepo, capsys):
     edit(drepo, "pkg/p.py", params(10))
     rc, _ = gjson(drepo)

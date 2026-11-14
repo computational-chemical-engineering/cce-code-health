@@ -206,7 +206,10 @@ earlier commit on the branch instead, for logging after a later docs commit). `-
 accepted-neutral --reason <why>` records a kept refactor or restructure step without debt gain (for
 example names and docstrings from review notes): the gate JSON must come from a run without
 `--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
-and duplicates are refused. `codehealth scan --json` lists `qualname` and `end_line` per function.
+and duplicates are refused, except a re-run: when every record for the campaign, tree and base is a
+gate-fail (e.g. a flaky tier), `--rerun-of STEP --reason <why>` logs a new gate JSON for that tree as a
+new record with `rerun_of` and `prior_gate_json`; `stats` then counts the superseded gate-fails as
+re-runs, not tries. `codehealth scan --json` lists `qualname` and `end_line` per function.
 `codehealth stats [--campaign C ...] [--runs FILE_OR_DIR ...]` summarises the run logs per recipe
 (tries, accepted, accepted-neutral, no-gain, gate-fails by tier, review-rejects including reverted
 accepts, rate, distinct files, median debt drop, median relocated share) with the playbook hints

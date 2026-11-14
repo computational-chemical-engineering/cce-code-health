@@ -76,6 +76,10 @@ campaign is one of its work packages and follows those rules.
    A deliberate step without gain (names, docstrings or comments from review notes) is gated
    without `--require-gain` and logged with `--result accepted-neutral --reason <review note>`.
    It is never a recipe step: it does not count as an accept in playbook statistics.
+   A gate that failed only on a tier unrelated to the step (a flaky wall-time test under
+   load) may be re-run on the same tree once the cause is understood: log the passing run
+   with `--rerun-of <failed step> --reason <why the failure was not the step's>`. Both
+   records stay; never re-run a failing gate until it passes.
    **Never write log lines by hand.** The log lives outside the working tree during the
    campaign (the gate rejects any change under `.codehealth/` in a step):
    `$(git rev-parse --git-common-dir)/codehealth/runs/<id>.jsonl`. At campaign end copy it

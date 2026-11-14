@@ -496,7 +496,10 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
         result = a.result or ("gate-fail" if failed else "review-reject")
     else:
         result = a.result or _infer_result(checks, meta_)
-    if not reverting and a.reason and result not in ("review-reject", "accepted-neutral", "gate-fail"):
+    if getattr(a, "rerun_of", None) is not None and not a.reason:
+        raise ValueError("--rerun-of needs --reason (why the earlier gate failed without the step being at fault)")
+    if (not reverting and a.reason and getattr(a, "rerun_of", None) is None
+            and result not in ("review-reject", "accepted-neutral", "gate-fail")):
         raise ValueError(f"--reason is only for review-reject, accepted-neutral or gate-fail (result: {result})")
     if result == "gate-fail" and not failed:
         raise ValueError("--result gate-fail but every check in the gate JSON passed")
@@ -593,13 +596,36 @@ def cmd_log(a) -> int:
         return _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha)
 
 
+def _check_rerun(a, same: list[dict], gj: Path) -> dict:
+    """Records already logged for this campaign, tree and base must all be gate-fails, and
+    --rerun-of must name the last of them; returns the fields the re-run record adds."""
+    rerun_of = getattr(a, "rerun_of", None)
+    if not same:
+        if rerun_of is not None:
+            raise ValueError(f"--rerun-of {rerun_of}: campaign {a.campaign} has no step for this tree and base")
+        return {}
+    last = same[-1]
+    if rerun_of is None:
+        hint = (f"; a re-run of a failed gate on the same tree is logged with --rerun-of {last.get('step')} "
+                f"--reason ..." if all(r.get("result") == "gate-fail" for r in same) else "")
+        raise ValueError(f"duplicate: campaign {a.campaign} already has step {last.get('step')} "
+                         f"for this tree and base{hint}")
+    if any(r.get("result") != "gate-fail" for r in same):
+        kept = next(r for r in same if r.get("result") != "gate-fail")
+        raise ValueError(f"--rerun-of: step {kept.get('step')} for this tree and base is {kept.get('result')}, "
+                         "only gate-fails can be re-run")
+    if rerun_of != last.get("step"):
+        raise ValueError(f"--rerun-of {rerun_of}: the last step for this tree and base is {last.get('step')}")
+    if any(str(gj) == r.get("gate_json") for r in same):
+        raise ValueError("--rerun-of: this gate JSON is already logged; a re-run needs a new gate run")
+    return {"rerun_of": rerun_of, "prior_gate_json": [r.get("gate_json") for r in same]}
+
+
 def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
     lines = [ln for ln in out.read_text().splitlines() if ln.strip()] if out.is_file() else []
-    for ln in lines:
-        old = json.loads(ln)
-        if (old.get("campaign"), old.get("head_tree"), old.get("base_sha")) == (a.campaign, m["head_tree"], m["base"]):
-            raise ValueError(f"duplicate: campaign {a.campaign} already has step {old.get('step')} "
-                             f"for this tree and base")
+    same = [r for r in map(json.loads, lines)
+            if (r.get("campaign"), r.get("head_tree"), r.get("base_sha")) == (a.campaign, m["head_tree"], m["base"])]
+    rerun = _check_rerun(a, same, gj)
     failed = next((c["name"] for c in checks if not c["ok"]), None)
     rec = {"campaign": a.campaign, "step": len(lines) + 1, "class": "revert" if reverts else m["mode"], "target": a.target,
            "recipe": a.recipe, "result": result, "failed_tier": failed, "reason": a.reason,
@@ -609,7 +635,7 @@ def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
            "target_debt": target_debt(a.target, m.get("function_debt")),
            "hypothesis": a.hypothesis, "reverts": reverts, "checks": {c["name"]: c["ok"] for c in checks},
            "details": {c["name"]: c.get("detail", "") for c in checks},
-           "gate_json": str(gj), "branch": _branch(repo),
+           "gate_json": str(gj), "branch": _branch(repo), **rerun,
            "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
@@ -735,6 +761,10 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--reason", help="required for --result review-reject, accepted-neutral and revert gate JSONs")
     pl.add_argument("--head", help="the commit that carries the judged tree (default HEAD); must be an "
                     "ancestor of HEAD, for logging after later commits")
+    pl.add_argument("--rerun-of", type=int, metavar="STEP",
+                    help="log a new gate run of a tree already logged as gate-fail (step STEP, the last "
+                         "for this tree and base), e.g. after a flaky tier; needs --reason; the record "
+                         "carries rerun_of and prior_gate_json")
     pl.add_argument("--model")
     pl.add_argument("--hypothesis")
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")

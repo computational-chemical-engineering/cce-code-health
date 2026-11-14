@@ -2,6 +2,7 @@
 
 Per recipe: attempts, accepted, accepted-neutral, no-gain, gate-fails (by tier), review-rejects
 (a `review-reject` record, or a `revert` record naming the recipe), accepted steps later reverted,
+gate-fails superseded by a re-run (`log --rerun-of`; counted as reruns, not tries),
 acceptance rate, distinct files, median debt drop of accepted steps, and the median `relocated`
 share where the log has function data. The refactor-loop skill's playbook rules become hints:
 promote after 3 kept accepts in 2 files, retire below 40 % acceptance after 5 tries, and add a
@@ -59,14 +60,19 @@ def _med(xs):
 
 def recipe_stats(records: list[dict]) -> dict[str, dict]:
     reverted = {s[:10] for r in records if r.get("class") == "revert" for s in (r.get("reverts") or [])}
+    # a gate-fail that a later record re-ran (`log --rerun-of`, e.g. a flaky tier) is not a try
+    superseded = {(r.get("campaign"), r["rerun_of"]) for r in records if r.get("rerun_of") is not None}
     by: dict[str, dict] = {}
     for r in records:
         recipe = r.get("recipe") or "(none)"
         s = by.setdefault(recipe, {"attempts": 0, "accepted": 0, "accepted_neutral": 0, "no_gain": 0,
                                    "gate_fail": 0, "review_reject": 0, "reverted": 0, "fail_tiers": {},
                                    "classes": set(), "files": set(), "drops": [], "relocated": [],
-                                   "campaigns": set()})
+                                   "campaigns": set(), "reruns": 0})
         res = r.get("result")
+        if res == "gate-fail" and (r.get("campaign"), r.get("step")) in superseded:
+            s["reruns"] += 1
+            continue
         if r.get("class") == "revert":
             if res == "review-reject":
                 s["review_reject"] += 1
@@ -116,7 +122,8 @@ def recipe_stats(records: list[dict]) -> dict[str, dict]:
                        "review_reject": s["review_reject"], "reverted": s["reverted"],
                        "rate": round(rate, 2) if rate is not None else None, "files": len(s["files"]),
                        "median_drop": _med(s["drops"]), "median_relocated": _med(s["relocated"]),
-                       "classes": sorted(s["classes"]), "campaigns": sorted(s["campaigns"]), "hints": hints}
+                       "classes": sorted(s["classes"]), "campaigns": sorted(s["campaigns"]),
+                       "reruns": s["reruns"], "hints": hints}
     return dict(sorted(out.items(), key=lambda kv: (-kv[1]["attempts"], kv[0])))
 
 
@@ -128,7 +135,8 @@ def table(stats: dict[str, dict]) -> list[str]:
         drop = f"{s['median_drop']:.1f}" if s["median_drop"] is not None else "-"
         rel = f"{s['median_relocated']:.0%}" if s["median_relocated"] is not None else "-"
         tiers = ", ".join(f"{t} {n}" for t, n in s["fail_tiers"].items())
-        note = "; ".join(x for x in (", ".join(s["hints"]), tiers) if x)
+        reruns = f"{s['reruns']} re-run gate-fail(s) not counted" if s.get("reruns") else ""
+        note = "; ".join(x for x in (", ".join(s["hints"]), tiers, reruns) if x)
         rows.append(f"{name[:26]:26} {s['tries']:5} {s['accepted']:4} {s['accepted_neutral']:4} {s['no_gain']:6} "
                     f"{s['gate_fail']:5} {s['review_reject'] + s['reverted']:4} {rate:>5} {s['files']:5} "
                     f"{drop:>6} {rel:>5}  {note}")
