@@ -27,6 +27,11 @@ side effects and floating-point operations, same exceptions and messages.
 - Comments outside the campaign scope (frozen or other packages' files) that name a moved
   module fail the gate's `scope` and `frozen` checks: list them for the owner, never edit them
   in a gated step.
+- A test that patches a moved name through its old module (`monkeypatch.setattr(old_mod,
+  "Name", ...)`, `mock.patch("pkg.old.Name")`, `patch.object(old_mod, "Name")`) silently
+  patches nothing once the moved code looks the name up in its new module, and the tests still
+  pass. Before each split, grep the tests for the moved names in setattr, patch and
+  patch.object calls and dotted strings, and list the hits for the owner of the tests.
 - Before each split, re-derive the move set and the importer list at the base and write the
   expected `codehealth arch` numbers into the plan before the run; a mismatch stops the split.
 

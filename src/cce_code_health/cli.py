@@ -381,7 +381,7 @@ KEPT = ("accepted", "accepted-neutral")   # results whose commit stays: must be 
 def _infer_result(checks: list, mode: str, before: float, after: float) -> str:
     if any(not c["ok"] for c in checks):
         return "gate-fail"
-    return "accepted" if mode == "optimize" or after < before - EPS else "no-gain"
+    return "accepted" if mode in ("optimize", "interface") or after < before - EPS else "no-gain"
 
 
 def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
@@ -408,7 +408,7 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
             raise ValueError(f"--result {a.result} needs --reason")
     checks = data["checks"]
     failed = [c for c in checks if not c["ok"]]
-    gained = meta_["mode"] == "optimize" or meta_["debt_after"] < meta_["debt_before"] - EPS
+    gained = meta_["mode"] in ("optimize", "interface") or meta_["debt_after"] < meta_["debt_before"] - EPS
     if reverting:
         result = a.result or ("gate-fail" if failed else "review-reject")
     else:
@@ -423,8 +423,8 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
         raise ValueError(f"--result accepted but debt did not drop ({meta_['debt_before']} -> {meta_['debt_after']}); "
                          "a deliberate step without gain (gated without --require-gain) is accepted-neutral")
     if result == "accepted-neutral":
-        if meta_["mode"] == "optimize":
-            raise ValueError("--result accepted-neutral is for refactor and restructure; optimize uses accepted")
+        if meta_["mode"] in ("optimize", "interface"):
+            raise ValueError(f"--result accepted-neutral is for refactor and restructure; {meta_['mode']} uses accepted")
         if meta_.get("require_gain") or any(c["name"] == "gain" for c in checks):
             raise ValueError("--result accepted-neutral needs a gate run without --require-gain")
         if meta_["debt_after"] > meta_["debt_before"] + EPS:
@@ -639,11 +639,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--ref-base", help="campaign base for reference and benchmark tiers "
                                      "(merge-base is used; default: same as --base); also exposed "
                                      "to tier commands as {ref_base}")
-    sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize", "restructure"), default="refactor",
+    sub.choices["gate"].add_argument("--mode", choices=("refactor", "optimize", "restructure", "interface"),
+                                     default="refactor",
                                      help="refactor: bitwise, no slowdown; optimize: declared tolerance, speedup; "
-                                     "restructure: refactor plus new modules under --plan")
-    sub.choices["gate"].add_argument("--plan", help="restructure mode: approved plan under "
-                                     ".codehealth/restructure/, read from the base commit")
+                                     "restructure: refactor plus new modules under --plan; interface: "
+                                     "refactor plus exactly the public-API changes the --plan lists")
+    sub.choices["gate"].add_argument("--plan", help="restructure or interface mode: approved plan under "
+                                     ".codehealth/restructure/ or .codehealth/interface/, read from the base commit")
     sub.choices["gate"].add_argument("--cadence", choices=("step", "campaign"), default="step")
     sub.choices["gate"].add_argument("--log", help="full log of tier commands")
     sub.choices["gate"].add_argument("--config", help="trial only: use this config instead of the base's")

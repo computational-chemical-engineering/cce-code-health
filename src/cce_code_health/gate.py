@@ -106,6 +106,11 @@ entry is identical; public names new at head must be listed in new_public, and e
 must exist at head. Meta `plan` = {path, blob (sha at base), id}; `codehealth log` writes class
 `restructure` and, as for refactor, needs a debt drop for accepted.
 
+Interface mode (`--mode interface --plan .codehealth/interface/<id>.toml`, see interface.py):
+deliberate public-API changes, exactly as the plan lists (removed, renamed, added); callers
+outside the scope or under forbid may follow when they match the plan's `callers`; accepted
+needs no debt drop.
+
 Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
 - `skip_exit = 77` (int or list, any tier kind): a run of the tier (base or head) exiting with one
   of these codes fails the tier with "not run (exit 77)"; in the self-test that is outcome
@@ -322,9 +327,10 @@ def base_tree(repo: Path, sha: str, keep: tuple = ()) -> Path:
 
 def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: bool = False,
                   plan: dict | None = None) -> list[Check]:
-    """Static rules; with `plan` (restructure mode) the `plan` check is added and `public_api`
-    follows the restructure rule."""
-    from . import architecture, restructure  # noqa: PLC0415
+    """Static rules; with `plan` (restructure or interface mode, `plan["kind"]`) the `plan`
+    check is added and `public_api` follows that mode's rule."""
+    from . import architecture, interface, restructure  # noqa: PLC0415
+    iface = plan is not None and plan.get("kind") == "interface"
     g = cfg.gate
     checks = []
     touched = {p for _, bp, hp in changes for p in (bp, hp) if p}
@@ -341,11 +347,21 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         frozen += [line.strip() for line in r.stdout.splitlines() if line.strip()]
     hit = sorted(p for p in touched if _match(p, frozen))
     checks.append(Check("frozen", not hit, ", ".join(hit[:10]) + note))
-    hit = sorted(p for p in touched if _match(p, list(g.get("forbid", [])) + [".codehealth/*"]))
+    callers = interface.exempt(plan) if iface else []          # interface plan: callers may follow
+    hit = sorted(p for p in touched if (_match(p, list(g.get("forbid", []))) and not _match(p, callers))
+                 or _match(p, [".codehealth/*"]))
     checks.append(Check("forbid", not hit, ", ".join(hit[:10])))
-    hit = sorted(p for p in touched if not cfg.in_scope(p))
+    hit = sorted(p for p in touched if not cfg.in_scope(p) and not _match(p, callers))
     checks.append(Check("scope", not hit, "out of scope: " + ", ".join(hit[:10]) if hit else ""))
-    if plan is not None:
+    if iface:
+        hit = interface.plan_problems(plan, changes, cfg, list(g.get("forbid", [])))
+        checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
+        cp = interface.caller_paths(plan, changes, cfg, list(g.get("forbid", [])))
+        cb = gitio.read_files(repo, base, sorted({bp for _, bp, _ in cp if bp}))
+        ch = gitio.read_files(repo, None, sorted({hp for _, _, hp in cp if hp}))
+        hit = interface.caller_problems(plan, cp, cb, ch, (cfg.architecture or {}).get("roots", ["src", "."]))
+        checks.append(Check("callers", not hit, "; ".join(hit[:5]) or f"{len(cp)} caller file(s) follow the plan"))
+    elif plan is not None:
         hit = restructure.plan_problems(plan, changes)
         checks.append(Check("plan", not hit, "; ".join(hit[:5]) or f"plan {plan['id']}"))
 
@@ -371,10 +387,17 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
             lb += _string_literals(t)
         for t in th.values():
             lh += _string_literals(t)
+        if iface:                                  # __all__ of the plan's files: left to public_api
+            lb, lh = lb - interface.all_strings(plan, tb), lh - interface.all_strings(plan, th)
         gone, new = lb - lh, lh - lb
         detail = "; ".join([f"removed {k}" for k in list(gone)[:3]] + [f"added {k}" for k in list(new)[:3]])
         checks.append(Check("literals", not gone and not new, with_cpp(detail[:400])))
-    if g.get("public_api", False) and plan is not None:
+    if iface:                                      # gate() refuses interface mode without public_api
+        problems, record = interface.public_api_problems(plan, py, tb, th, _public_api)
+        c = Check("public_api", not problems, with_cpp("; ".join(problems[:5])))
+        c.interface = record                       # old and new API text per planned change
+        checks.append(c)
+    elif g.get("public_api", False) and plan is not None:
         problems = restructure.public_api_problems(plan, py, tb, th, _public_api, roots)
         checks.append(Check("public_api", not problems, with_cpp("; ".join(problems[:5]))))
     elif g.get("public_api", False):
@@ -1264,10 +1287,10 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     refactor, plus the `plan` check and the restructure public-API rule; `info["plan"]` receives
     {path, blob, id}.
     """
-    if mode not in ("refactor", "optimize", "restructure"):
+    if mode not in ("refactor", "optimize", "restructure", "interface"):
         raise ValueError(f"unknown mode {mode!r}")
-    if (mode == "restructure") != bool(plan):
-        raise ValueError("--mode restructure needs --plan, and --plan is only for --mode restructure")
+    if (mode in ("restructure", "interface")) != bool(plan):
+        raise ValueError("--mode restructure and --mode interface need --plan, and --plan is only for those modes")
     if plan and revert:
         raise ValueError("--plan and --revert are incompatible")
     base = gitio.merge_base(repo, base_ref, "HEAD")
@@ -1276,11 +1299,16 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
            if config_override else config.load(repo, base))
     plan_data = None
     if plan:
-        from .restructure import load_plan  # noqa: PLC0415
-        plan_data = load_plan(repo, base, plan, cfg)
+        if mode == "interface":
+            from .interface import load_plan  # noqa: PLC0415
+        else:
+            from .restructure import load_plan  # noqa: PLC0415
+        if mode == "interface" and not cfg.gate.get("public_api", False):
+            raise ValueError("--mode interface needs [gate] public_api = true (it is the rule that checks the plan)")
+        plan_data = {**load_plan(repo, base, plan, cfg), "kind": mode}
         if info is not None:
             info["plan"] = {"path": plan_data["path"], "blob": plan_data["blob"], "id": plan_data["id"]}
-    mode = "refactor" if mode == "restructure" else mode   # tiers and config checks as in refactor
+    mode = "refactor" if mode in ("restructure", "interface") else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
     fns: dict = {}
     debt, db, dh = debt_check(repo, base, cfg, changes, fns)

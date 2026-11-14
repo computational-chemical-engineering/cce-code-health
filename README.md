@@ -353,6 +353,53 @@ planned new file defines it with the identical API entry; new public names must 
 `new_public`, and each listed name must exist at head. Gate JSON `meta.plan` = {path, blob, id};
 `codehealth log` records class `restructure` (accepted needs a debt drop, as for refactor).
 
+### Interface steps (deliberate public-API changes)
+
+```bash
+codehealth gate --base <last accepted> --mode interface --plan .codehealth/interface/adr-0076-1.toml
+```
+
+```toml
+id = "adr-0076-1"
+approved_by = "jane"
+reason = "ADR 0076: drop the compatibility re-exports of pkg.api"
+removed = ["src/pkg/api.py:old_solve", "src/pkg/compat.py"]     # path:Name, or a whole module
+renamed = {"src/pkg/a.py:Solver" = "src/pkg/core/solver.py:Solver", "src/pkg/b.py" = "src/pkg/core/b.py"}
+changed = ["src/pkg/run.py:run"]                                 # same name and module, new signature
+added = ["src/pkg/core/solver.py:make_solver"]                   # new names that are not renames
+new_files = ["src/pkg/core/*.py"]
+callers = ["tests/**", "docs/examples/**"]                       # files that follow the change
+```
+
+For changes an ADR makes on purpose (names removed, renamed, moved or re-signed, no shims). The
+plan is read from the base commit, one plan per step; the mode needs `[gate] public_api = true`
+(exit 2 otherwise). Plan entries must be in scope; a name entry may not sit under a module the
+plan removes or renames; `callers` may not be `**` or cover `.codehealth/`. Everything runs as
+in refactor mode, except:
+- `public_api` is exact over the touched in-scope Python files, counting every top-level
+  binding (inside `if`, `try`, `with` and loops too, class-level assignments as members, a
+  module `__getattr__` as a change). A removal must be listed (a class covers its members, a
+  module path the whole module) and the name may not survive in any form (import shim, alias,
+  `__getattr__`); a rename moves the name with the same API (signature, decorators, bases,
+  members, constant value, re-export source); `changed` names keep name and module but their
+  API must differ; an addition must be in `added` or be a rename's new side; any other
+  difference fails, and `__all__` may change only by the names the plan lists for that file.
+  A listed change the step did not make fails. The check's JSON entry carries `interface`:
+  the old and new API text of each planned change, for review.
+- `plan`: added in-scope files match `new_files`; touched paths outside the scope or under
+  `forbid` must match `callers`. Frozen paths and `.codehealth/` stay refused.
+- `callers`: each caller file may only follow the plan. After applying the renames (names,
+  attributes, modules) to its base version, it must equal its head version, except that
+  statements naming a removed name may be deleted, a statement naming a changed name may be
+  rewritten into one of the same kind that still names it (`assert run(x)` to
+  `assert run(x, report)`, not to a bare call), and imports move as the renames say. Caller
+  files may not be added, deleted or renamed (no new `conftest.py`). Non-Python callers are
+  compared line by line by the same rule.
+- `literals`: the `__all__` elements of the files the plan names are left to `public_api`.
+`codehealth log` records class `interface`; accepted needs all checks ok and needs no debt drop
+(debt may still not rise). With `[docs] docstrings = true`, a renamed undocumented name counts
+as new for D1: document it in the same step.
+
 ### Documentation health
 
 ```bash
