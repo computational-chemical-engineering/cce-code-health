@@ -86,6 +86,14 @@ def size_smells(reports: dict[str, dict]) -> int:
     return sum(SIZE_PENALTY.get(s, 0) for r in reports.values() for s in r["file_smells"])
 
 
+def added_smells(old: list[str] | None, new: list[str]) -> list[str]:
+    """File smells of `new` that `old` lacked. The size smells are one ordered family
+    (none < large_file < huge_file): a downgrade, huge -> large, is not new."""
+    old = old or []
+    size_old = max((SIZE_PENALTY.get(x, 0) for x in old), default=0)
+    return sorted(x for x in set(new) - set(old) if x not in SIZE_PENALTY or SIZE_PENALTY[x] > size_old)
+
+
 def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[list[str], list[str]]:
     """(errors, notes) for head files with a file smell their base counterpart lacked.
 
@@ -98,7 +106,7 @@ def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[
     errors, notes = [], []
     for path, r in sorted(rh.items()):
         old = rb.get(counterpart.get(path) or "")
-        new = sorted(set(r["file_smells"]) - set(old["file_smells"] if old else []))
+        new = added_smells(old["file_smells"] if old else None, r["file_smells"])
         if "duplication" in new and not dup_rose:
             new.remove("duplication")
             notes.append(f"{path}: duplication {r['dup_fraction']:.0%} of nloc {r['nloc']}, concentrated "

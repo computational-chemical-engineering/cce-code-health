@@ -14,7 +14,7 @@ from pathlib import Path
 from . import config, gitio
 from .profiles import METRICS
 from .python_backend import analyze
-from .report import file_report
+from .report import added_smells, file_report
 
 EPS = 1e-9
 MAX_FUNCTIONS = 12
@@ -69,7 +69,7 @@ def check_edit(rel: str, old_text: str, new_text: str, cfg: config.Config) -> st
         if rose or (f["brain"] and f["qualname"] not in old_brains):
             bad.append(f)
     d0 = old["debt"] if old else 0.0
-    smells = sorted(set(new["file_smells"]) - set(old["file_smells"] if old else []))
+    smells = added_smells(old["file_smells"] if old else None, new["file_smells"])
     inv = len(_invalid(new)) > len(_invalid(old))
     if not (new["debt"] > d0 + EPS or bad or smells or inv):
         if not ds:

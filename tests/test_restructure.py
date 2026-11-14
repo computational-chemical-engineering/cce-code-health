@@ -215,3 +215,26 @@ def test_split_still_needs_size_smell_removed(big, capsys):
     (big / "pkg/part.py").write_text(_consts(1050, 1100))
     assert gate(big, "--require-gain", plan=".codehealth/restructure/big.toml") == 1
     assert "no debt reduction" in capsys.readouterr().out
+
+
+def test_split_of_huge_file_into_large_one_is_a_downgrade_not_a_new_smell(tmp_path, capsys):
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".gitignore": "__pycache__/\n", ".codehealth/config.toml": CONFIG,
+                      ".codehealth/restructure/big.toml": SPLIT_PLAN, "pkg/__init__.py": "",
+                      "pkg/mod.py": MOD + _consts(0, 2100),
+                      "frozen/ident.py": "X = 1\n", "tests/test_x.py": "def test(): pass\n"})
+    (tmp_path / "pkg/mod.py").write_text(MOD + _consts(0, 1300))        # huge_file -> large_file
+    (tmp_path / "pkg/part.py").write_text(_consts(1300, 2100))
+    gj = tmp_path.parent / "huge.json"
+    assert gate(tmp_path, "--require-gain", "--json", str(gj), plan=".codehealth/restructure/big.toml") == 0
+    out = capsys.readouterr().out
+    assert "new file smell" not in out and "size smells 2 -> 1" in out
+    assert json.loads(gj.read_text())["meta"]["size_smells"] == [2, 1]
+
+
+def test_added_smells_size_family():
+    from cce_code_health.report import added_smells
+    assert added_smells(["huge_file"], ["large_file"]) == []
+    assert added_smells(["large_file"], ["huge_file"]) == ["huge_file"]
+    assert added_smells(None, ["large_file"]) == ["large_file"]
+    assert added_smells(["huge_file"], ["large_file", "duplication"]) == ["duplication"]
