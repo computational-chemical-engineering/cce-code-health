@@ -152,10 +152,11 @@ def test_findings_rise_fails_equal_or_lower_passes(tmp_path):
     (repo / "src/a.cpp").write_text(CPP + "int g() { return 2; }  // WARN(bugprone-x)\n")
     rc, checks = gate_json(repo)
     assert rc == 1
-    assert checks["tidy"]["detail"] == "findings rose: src/a.cpp [bugprone-x] 1 -> 2; base 2, head 3"
+    assert checks["tidy"]["detail"] == ("findings rose: [bugprone-x] 1 -> 2 over the touched files "
+                                       "(src/a.cpp 1 -> 2); base 2, head 3")
     (repo / "src/a.cpp").write_text(CPP + "int g() { return 2; }  // WARN(modernize-y)\n")
     rc, checks = gate_json(repo)
-    assert rc == 1 and "src/a.cpp [modernize-y] 0 -> 1" in checks["tidy"]["detail"]
+    assert rc == 1 and "[modernize-y] 0 -> 1 over the touched files (src/a.cpp 0 -> 1)" in checks["tidy"]["detail"]
     (repo / "src/a.cpp").write_text("// moved\n" + CPP)            # same count, other line: pass
     rc, checks = gate_json(repo)
     assert rc == 0 and checks["tidy"]["detail"] == "base 2, head 2"
@@ -170,6 +171,22 @@ def test_findings_rename_maps_base_path(tmp_path):
     git(repo, "mv", "src/a.cpp", "src/b.cpp")
     rc, checks = gate_json(repo)
     assert rc == 0 and checks["tidy"]["detail"] == "base 2, head 2"
+
+
+def test_findings_moved_between_touched_files_pass_new_ones_fail(tmp_path):
+    repo, _ = findings_repo(tmp_path)
+    g = "int g() { return 2; }  // WARN(bugprone-x)\n"
+    (repo / "src/a.cpp").write_text(CPP + g)
+    git(repo, "add", "src/a.cpp")
+    git(repo, "commit", "-qm", "two findings in a")
+    (repo / "src/a.cpp").write_text(CPP)                            # g moves to b.cpp
+    (repo / "src/b.cpp").write_text(g)
+    rc, checks = gate_json(repo)
+    assert rc == 0 and checks["tidy"]["detail"] == ("base 3, head 3; 1 per-file rise(s) offset within "
+                                                    "the touched files (moved code)")
+    (repo / "src/b.cpp").write_text(g + "int h() { return 3; }  // WARN(bugprone-x)\n")
+    rc, checks = gate_json(repo)
+    assert rc == 1 and "[bugprone-x] 2 -> 3 over the touched files (src/b.cpp 0 -> 2)" in checks["tidy"]["detail"]
 
 
 def test_findings_ignore_exit_false(tmp_path):

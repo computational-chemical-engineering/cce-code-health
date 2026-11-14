@@ -134,8 +134,10 @@ Build-tool tiers (C++ suites; see the README section "Build-tool tiers (C++)"):
   skip_exit, fail_regex): runs cmd in the tree of `--base` (not ref_base) and at head, parses
   `file:line:col: warning|error: ... [check]` lines (gcc, clang, clang-tidy), maps file paths to
   tree-relative ones (outside the tree: `external:<path>`) and counts unique (file, line, col,
-  check) per (file, check); base paths of renamed files are mapped to head. Fails when any count
-  rises ("findings rose: path [check] 3 -> 5", up to 10), else "base N, head M". With
+  check); base paths of renamed files are mapped to head. Fails when, for a check, the count
+  summed over the touched files rises ("[check] 3 -> 5 over the touched files (path 1 -> 3)"),
+  or a (file, check) count of an untouched file rises ("path [check] 3 -> 5"); up to 10 items,
+  else "base N, head M" (plus how many per-file rises moved code offset). With
   ignore_exit = false a nonzero exit fails. Base findings are cached in
   `<git-common-dir>/codehealth/cache/<base sha>/<tier>/findings.json` keyed by cmd and env.
   Not a behaviour tier: the self-test skips it.
@@ -1095,17 +1097,32 @@ def _base_findings(t, ctx: Ctx) -> set:
 
 
 def _findings(t, ctx: Ctx) -> tuple[bool, str, int | None]:
-    """Ratchet: no (file, check) may have more unique findings at head than at base."""
+    """Ratchet on unique findings: per check summed over the files the change touches (code moved
+    between touched files moves its findings with it), per (file, check) elsewhere."""
     base = _base_findings(t, ctx)
     head, rc = _findings_run(t, ctx.repo, ctx, "head")
     renamed = {bp: hp for _, bp, hp in ctx.changes if bp and hp and bp != hp}
+    touched = ({hp for _, _, hp in ctx.changes if hp}
+               | {bp for _, bp, hp in ctx.changes if bp and not hp})
     cb = Counter((renamed.get(f, f), c) for f, _, _, c in base)
     ch = Counter((f, c) for f, _, _, c in head)
-    rises = sorted(k for k in ch if ch[k] > cb[k])
+    tb, th = Counter(), Counter()
+    for (f, c), n in cb.items():
+        if f in touched:
+            tb[c] += n
+    for (f, c), n in ch.items():
+        if f in touched:
+            th[c] += n
+    per_file = sorted(k for k in ch if ch[k] > cb[k])
+    moved = [k for k in per_file if k[0] in touched and th[k[1]] <= tb[k[1]]]
+    items = [f"{f} [{c}] {cb[(f, c)]} -> {ch[(f, c)]}" for f, c in per_file if f not in touched]
+    for c in sorted(x for x in th if th[x] > tb[x]):
+        where = ", ".join(f"{f} {cb[(f, x)]} -> {ch[(f, x)]}" for f, x in per_file if x == c and f in touched)
+        items.append(f"[{c}] {tb[c]} -> {th[c]} over the touched files" + (f" ({where})" if where else ""))
     totals = f"base {len(base)}, head {len(head)}"
-    if not rises:
-        return True, totals, rc
-    items = [f"{f} [{c}] {cb[(f, c)]} -> {ch[(f, c)]}" for f, c in rises]
+    if not items:
+        return True, totals + (f"; {len(moved)} per-file rise(s) offset within the touched files "
+                               f"(moved code)" if moved else ""), rc
     more = f" (+{len(items) - 10} more)" if len(items) > 10 else ""
     return False, "findings rose: " + "; ".join(items[:10]) + more + f"; {totals}", rc
 

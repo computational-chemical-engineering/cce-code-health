@@ -260,7 +260,7 @@ skip_exit = 77                      # a test that cannot run is "not run", never
 fail_regex = '\*\*\*Skipped|Not Run|SKIPPED'   # ctest exits 0 when tests are skipped
 [[gate.tier]]
 name = "tidy"
-kind = "findings"                   # ratchet: no (file, check) may gain findings
+kind = "findings"                   # ratchet: no check may gain findings over the touched files
 cmd = "cmake -S . -B build-tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null && run-clang-tidy -quiet -p build-tidy"
 cadence = "campaign"
 [[gate.tier]]
@@ -291,8 +291,10 @@ last = 2
 - `findings` runs `cmd` in the tree of `--base` (the last accepted step) and at head, parses
   `file:line:col: warning|error: ... [check]` (gcc, clang with `-fdiagnostics-show-option`,
   clang-tidy), maps absolute paths in either tree to repo-relative ones (others become
-  `external:<path>`), follows renames, and fails when any (file, check) count rises, listing
-  `path [check] 3 -> 5`. `ignore_exit` (default true) because clang-tidy exits nonzero when it
+  `external:<path>`), follows renames, and fails when a check's count summed over the touched
+  files rises (`[check] 3 -> 5 over the touched files (path 1 -> 3)`; code moved between touched
+  files takes its findings along) or a (file, check) count of an untouched file rises
+  (`path [check] 3 -> 5`). `ignore_exit` (default true) because clang-tidy exits nonzero when it
   finds something. The base tree is cleaned before each use, so `cmd` must configure its own
   build directory; base findings are cached per base sha, tier and cmd.
 - `convergence` reads `h error` lines from its single output and requires the observed orders
