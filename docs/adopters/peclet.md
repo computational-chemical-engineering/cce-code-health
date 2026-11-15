@@ -105,7 +105,7 @@ Worst functions: dem `demSolveContacts` (debt 345, CCN 261, NLOC 912); flow `bin
 "binding table" exclusion or recipe); flow `Solver<Grid>::scalarCutAssembleSolve` (CCN 128);
 voro `meshVolumeOptimize` (CCN 90, 14 params).
 
-## dem onboarding progress (peclet_health, 2026-11-13; nothing pushed to dem main)
+## dem onboarding progress (peclet_health, 2026-11-13 to 2026-11-15)
 
 - Config on dem branch code-health (7538e81), revised from the draft: core pinned via
   FETCHCONTENT_SOURCE_DIR + FULLY_DISCONNECTED (the base worktree had silently fetched core
@@ -162,3 +162,24 @@ voro `meshVolumeOptimize` (CCN 90, 14 params).
   The rest of demSolveContacts holds `[&]` host lambdas and locals used later: needs a design.
   Brain-count exit rule now in the refactor-loop skill. S5 (WO-7): dedup of 4 colouring brain
   functions, step 0 classifies the pair diff; GPU bench (ABBA) added to the device check.
+
+## dem campaign landed (2026-11-15)
+
+- PR computational-chemical-engineering/peclet-dem#13 merged (merge commit) -> dem main 2ed8411;
+  umbrella main 3138c71 (campaign docs and dem pointer). Tool pin 93a36d8, scope src/*.
+- S1-S8: debt 1871.8 -> 1475.6 (-21 %), brain 12 -> 7; 38 run-log records (33 accepted or
+  accepted-neutral, 3 gate-fail, 1 review-reject, plus the base). Touched-file debt
+  1465.6 -> 1069.4; final campaign gate 13/13; `codehealth diff --base 3fd9b93` PASS.
+- demSolveContacts 345 -> 21.2 (CCN 261 -> 24); solveOne 97.4 -> 54.9; hertzWallForces
+  49.4 -> 29.0 (no longer brain); solveVelocityColoredGS 42.1 -> 30.1 (still brain: a dead
+  shock-propagation block, left for Frank).
+- PR CI green (single rank, MPI np 1/2/4, clang-format, ruff); per round CUDA ctest 303/303,
+  GPU envelope <= 1.03 (S8), timing ratio 0.974 (S8) and 1.054 (S7).
+- `codehealth stats`: extract-kernel-phase 11/12, launch-params-struct 5/5 (mean drop 14.2),
+  host-state-owner 6/6, device-helper-extraction 2/3 (1 SASS reject), restructure-split-file 0/2
+  (both before the split fixes 569c85b and 93a36d8).
+- Tool fixes this campaign drove: step-gate file smells, docs-only commits at campaign cadence,
+  split as a size-smell gain, concentrated duplication as a note, clang-tidy ratchet per check
+  over the touched files, `log --external-fail`, relative gate_json paths, `docs` without a
+  [docs] table is off rather than an error.
+- Next on the Peclet side: flow (after a ping to vof), pnm after A7's junction law.

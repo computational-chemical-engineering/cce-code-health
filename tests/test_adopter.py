@@ -402,3 +402,34 @@ def test_log_shared_across_worktrees_with_branch(drepo, capsys, tmp_path):
     recs = [json.loads(x) for x in (drepo / ".git/codehealth/runs/c1.jsonl").read_text().splitlines()]
     assert [r["step"] for r in recs] == [1, 2] and recs[1]["branch"] == "eng2"
     assert recs[0]["head_sha"] == base and isinstance(recs[0]["branch"], str)
+
+
+def test_log_external_fail_and_relative_gate_json(drepo, capsys):
+    edit(drepo, "pkg/p.py", params(8))
+    git(drepo, "add", "-A")
+    git(drepo, "commit", "-qm", "step")
+    (drepo / "runs").mkdir()
+    out = drepo / "runs/g.json"
+    assert gate(drepo, "--base", "HEAD~1", "--json", str(out)) == 0
+    lg = ["log", "--repo", str(drepo), "--gate-json", str(out), "--campaign", "c1",
+          "--target", "pkg/p.py::f", "--recipe", "r1"]
+    assert main([*lg, "--result", "gate-fail"]) == 2
+    assert "--external-fail NAME" in capsys.readouterr().err
+    assert main([*lg, "--result", "gate-fail", "--external-fail", "G-sass"]) == 2      # needs --reason
+    assert main([*lg, "--result", "accepted", "--external-fail", "G-sass", "--reason", "x"]) == 2
+    assert main([*lg, "--result", "gate-fail", "--external-fail", "G-sass", "--reason", "SASS spills rose"]) == 0
+    rec = json.loads((drepo / ".git/codehealth/runs/c1.jsonl").read_text())
+    assert rec["result"] == "gate-fail" and rec["failed_tier"] == "external:G-sass"
+    assert rec["gate_json"] == "runs/g.json"
+
+
+def test_docs_without_table_is_off_not_an_error(drepo, capsys):
+    assert main(["docs", "--repo", str(drepo)]) == 0
+    assert "DOCS OFF" in capsys.readouterr().out
+    assert main(["docs", "--repo", str(drepo), "--stale"]) == 0
+    (drepo / "CLAUDE.md").write_text("word " * 30 + "\n")
+    git(drepo, "add", "CLAUDE.md")
+    git(drepo, "commit", "-qm", "agent doc")
+    capsys.readouterr()
+    assert main(["docs", "--repo", str(drepo), "--agent"]) == 0
+    assert "CLAUDE.md" in capsys.readouterr().out

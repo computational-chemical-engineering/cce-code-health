@@ -205,8 +205,10 @@ step must be committed first (HEAD's tree must equal the gate's `head_tree`; `--
 earlier commit on the branch instead, for logging after a later docs commit). `--result
 accepted-neutral --reason <why>` records a kept refactor or restructure step without debt gain (for
 example names and docstrings from review notes): the gate JSON must come from a run without
-`--require-gain`, all checks ok, debt not higher. It is never inferred. Trial and self-test JSONs
-and duplicates are refused, except a re-run: when every record for the campaign, tree and base is a
+`--require-gain`, all checks ok, debt not higher. It is never inferred. A check run outside codehealth (a GPU or SASS check) that failed on a tree whose gate passed is
+logged with `--result gate-fail --external-fail NAME --reason <what it reported>` (failed_tier
+`external:NAME`). `gate_json` is logged relative to the repo root when the file lies inside it.
+Trial and self-test JSONs and duplicates are refused, except a re-run: when every record for the campaign, tree and base is a
 gate-fail (e.g. a flaky tier), `--rerun-of STEP --reason <why>` logs a new gate JSON for that tree as a
 new record with `rerun_of` and `prior_gate_json`; `stats` then counts the superseded gate-fails as
 re-runs, not tries. `codehealth scan --json` lists `qualname` and `end_line` per function.

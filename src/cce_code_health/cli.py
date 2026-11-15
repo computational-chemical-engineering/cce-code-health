@@ -255,10 +255,18 @@ def cmd_arch(a) -> int:
     return 0
 
 
+def _docs_off(a, repo: Path, cfg, ref) -> int:
+    """No [docs] table: docs health is opt-in, so say so and succeed (CI may call it everywhere)."""
+    print(f"DOCS OFF {repo.name}: {cfg.source} has no [docs] table (docs health is opt-in, see "
+          f"docs/DOCS_HEALTH.md); `codehealth docs --agent` works without it")
+    write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), "off": True})
+    return 0
+
+
 def cmd_docs_stale(a, repo: Path, cfg) -> int:
     from . import docs_stale  # noqa: PLC0415
     if not cfg.docs:
-        raise ValueError(f"{cfg.source}: no [docs] table")
+        return _docs_off(a, repo, cfg, None)
     rows = docs_stale.stale_docs(repo, cfg, min_shared=a.min_shared, min_degree=a.min_degree)
     write_json(a.json, {"meta": meta(repo, cfg, ref="worktree", min_shared=a.min_shared,
                                      min_degree=a.min_degree), "stale": rows})
@@ -280,12 +288,11 @@ def agent_texts(repo: Path, ref: str | None, d: dict) -> dict[str, str]:
 
 def cmd_docs_agent(a, repo: Path, ref: str | None, cfg) -> int:
     from . import agent_docs, docs as docsmod  # noqa: PLC0415
-    if not cfg.docs:
-        raise ValueError(f"{cfg.source}: no [docs] table")
-    probs = docsmod.check_config(cfg.docs)
+    d = cfg.docs or {}                       # without a [docs] table: the default agent globs and budget
+    probs = docsmod.check_config(d) if d else []
     if probs:
         raise ValueError(f"{cfg.source}: " + "; ".join(probs))
-    rep = agent_docs.report(agent_texts(repo, ref, cfg.docs), cfg.docs)
+    rep = agent_docs.report(agent_texts(repo, ref, d), d)
     write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree"), **rep})
     print(f"{'agent doc':60} {'words':>6} {'lines':>6} {'over':>6}")
     for x in rep["docs"][:a.top]:
@@ -312,7 +319,7 @@ def cmd_docs(a) -> int:
         return cmd_docs_agent(a, repo, ref, cfg)
     res = docsmod.analyse(repo, ref, cfg)
     if res is None:
-        raise ValueError(f"{cfg.source}: no [docs] table")
+        return _docs_off(a, repo, cfg, ref)
     d = cfg.docs
     st = docsmod.stats(res, d)
     res.tree.close()
@@ -504,8 +511,19 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
     if (not reverting and a.reason and getattr(a, "rerun_of", None) is None
             and result not in ("review-reject", "accepted-neutral", "gate-fail")):
         raise ValueError(f"--reason is only for review-reject, accepted-neutral or gate-fail (result: {result})")
-    if result == "gate-fail" and not failed:
-        raise ValueError("--result gate-fail but every check in the gate JSON passed")
+    ext = getattr(a, "external_fail", None)
+    if ext is not None:
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", ext):
+            raise ValueError(f"--external-fail must match [A-Za-z0-9._-]+, got {ext!r}")
+        if result != "gate-fail" or reverting or not a.reason:
+            raise ValueError("--external-fail needs --result gate-fail and --reason (what the external check "
+                             "reported), and is not for revert gate JSONs")
+        if failed:
+            raise ValueError(f"--external-fail: check {failed[0]['name']} already failed in the gate JSON; "
+                             "log that failure instead")
+    elif result == "gate-fail" and not failed:
+        raise ValueError("--result gate-fail but every check in the gate JSON passed (a check run outside "
+                         "codehealth that failed: --external-fail NAME --reason ...)")
     if result != "gate-fail" and failed:
         raise ValueError(f"--result {result} but check {failed[0]['name']} failed in the gate JSON")
     if result == "accepted" and not gained:
@@ -599,7 +617,16 @@ def cmd_log(a) -> int:
         return _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha)
 
 
-def _check_rerun(a, same: list[dict], gj: Path) -> dict:
+def _gj_path(gj: Path, repo: Path) -> str:
+    """The gate JSON path as logged: relative to the repo root when inside it (run logs get
+    copied into public repos), else absolute."""
+    try:
+        return str(gj.relative_to(repo))
+    except ValueError:
+        return str(gj)
+
+
+def _check_rerun(a, same: list[dict], gj: Path, repo: Path) -> dict:
     """Records already logged for this campaign, tree and base must all be gate-fails, and
     --rerun-of must name the last of them; returns the fields the re-run record adds."""
     rerun_of = getattr(a, "rerun_of", None)
@@ -619,7 +646,7 @@ def _check_rerun(a, same: list[dict], gj: Path) -> dict:
                          "only gate-fails can be re-run")
     if rerun_of != last.get("step"):
         raise ValueError(f"--rerun-of {rerun_of}: the last step for this tree and base is {last.get('step')}")
-    if any(str(gj) == r.get("gate_json") for r in same):
+    if any(_gj_path(gj, repo) == r.get("gate_json") or str(gj) == r.get("gate_json") for r in same):
         raise ValueError("--rerun-of: this gate JSON is already logged; a re-run needs a new gate run")
     return {"rerun_of": rerun_of, "prior_gate_json": [r.get("gate_json") for r in same]}
 
@@ -628,8 +655,11 @@ def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
     lines = [ln for ln in out.read_text().splitlines() if ln.strip()] if out.is_file() else []
     same = [r for r in map(json.loads, lines)
             if (r.get("campaign"), r.get("head_tree"), r.get("base_sha")) == (a.campaign, m["head_tree"], m["base"])]
-    rerun = _check_rerun(a, same, gj)
+    rerun = _check_rerun(a, same, gj, repo)
     failed = next((c["name"] for c in checks if not c["ok"]), None)
+    ext = getattr(a, "external_fail", None)
+    if ext:
+        failed = f"external:{ext}"
     rec = {"campaign": a.campaign, "step": len(lines) + 1, "class": "revert" if reverts else m["mode"], "target": a.target,
            "recipe": a.recipe, "result": result, "failed_tier": failed, "reason": a.reason,
            "debt_before": m["debt_before"], "debt_after": m["debt_after"], "base_sha": m["base"],
@@ -638,7 +668,7 @@ def _append_log(a, repo, out, gj, checks, m, result, reverts, head_sha) -> int:
            "target_debt": target_debt(a.target, m.get("function_debt")),
            "hypothesis": a.hypothesis, "reverts": reverts, "checks": {c["name"]: c["ok"] for c in checks},
            "details": {c["name"]: c.get("detail", "") for c in checks},
-           "gate_json": str(gj), "branch": _branch(repo), **rerun,
+           "gate_json": _gj_path(gj, repo), "branch": _branch(repo), **rerun,
            "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     with open(out, "a") as f:
         f.write(json.dumps(rec) + "\n")
@@ -768,6 +798,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="log a new gate run of a tree already logged as gate-fail (step STEP, the last "
                          "for this tree and base), e.g. after a flaky tier; needs --reason; the record "
                          "carries rerun_of and prior_gate_json")
+    pl.add_argument("--external-fail", metavar="NAME",
+                    help="record a gate-fail of a check run outside codehealth (e.g. a GPU or SASS check) "
+                         "on a gate JSON whose checks all passed; needs --result gate-fail and --reason; "
+                         "failed_tier becomes external:NAME")
     pl.add_argument("--model")
     pl.add_argument("--hypothesis")
     pl.add_argument("--out", help="default: <git-common-dir>/codehealth/runs/<campaign>.jsonl")

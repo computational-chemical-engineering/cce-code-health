@@ -51,6 +51,7 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - OpenFlowsheet S19 I-15 request (2026-11-14, done): interface plan keys `literals_added`/`literals_removed` ({file, literal, count, reason}); literals check passes only on exactly the declared multiset difference, each entry true in its own file; meta plan carries them. 331 tests.
 - OFS I-15 passed on 8b40f31 (17/17, 8 declared literals). Follow-up done: `literals` detail lists every difference (no cap); console truncates any check detail at 600 chars, the gate JSON keeps it whole.
 - OFS S19 B1 bug (2026-11-14, fixed): split of region.py huge -> large failed as "new file smell large_file"; size smells are now one ordered family (report.added_smells, used by gate, diff and hook). 334 tests.
+- dem LANDED 2026-11-15: peclet-dem#13 merged -> dem main 2ed8411; debt 1871.8 -> 1475.6 (-21 %), brain 12 -> 7 (docs/adopters/peclet.md). Its S8 findings done: `log --external-fail NAME` (gate-fail of an external check), gate_json logged repo-relative, `docs` without [docs] prints DOCS OFF and exits 0 (`--agent` uses defaults). 336 tests. v0.2.0 tag now waits only for OFS W4.
 - Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 
