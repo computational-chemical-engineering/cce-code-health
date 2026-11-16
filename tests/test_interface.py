@@ -7,6 +7,7 @@ from test_git import commit, git
 from cce_code_health.cli import main
 from cce_code_health.gate import _public_api
 from cce_code_health.interface import caller_problems, public_api_problems
+from cce_code_health.gitio import BinaryText, decode
 
 PLAN_PATH = ".codehealth/interface/adr.toml"
 PLAN = """
@@ -335,7 +336,13 @@ def test_callers_patch_target_must_follow_exactly():
 
 
 def test_callers_binary_and_record():
-    assert cpb("\x00�1", "\x00�2", P, "tests/data/x.npy") == ["tests/data/x.npy: binary caller file may not change"]
+    assert cpb(decode(b"\x00\x011"), decode(b"\x00\x012"), P, "tests/data/x.npy") == [
+        "tests/data/x.npy: binary caller file may not change"]
+    assert cpb(decode(b"\xff1"), decode(b"\xff2"), P, "tests/data/x.bin") == [
+        "tests/data/x.bin: binary caller file may not change"]
+    # a literal U+FFFD in valid UTF-8 is text: the caller rules apply, and an unchanged line passes
+    text = decode("def test():\n    assert '\ufffd' == '\ufffd'\n".encode())
+    assert not isinstance(text, BinaryText) and cpb(text, text + "\n", P, "tests/test_u.py") == []
     base = H + "from pkg.m import legacy\n\ndef test_b():\n    assert legacy() == 2\n\n\ndef test_c():\n    assert run(1) == 3\n"
     head = H + "\ndef test_c():\n    assert run(1, report=None) == 3\n"
     probs, rec = caller_record(P, [("M", "tests/t.py", "tests/t.py")], {"tests/t.py": base}, {"tests/t.py": head}, ["src"])
@@ -480,3 +487,80 @@ def test_gate_accepts_planned_all_on_existing_module(repo, capsys):
     assert gate(repo, plan=".codehealth/interface/all.toml") == 0
     out = capsys.readouterr().out
     assert "ok   public_api" in out and "ok   literals" in out
+
+
+OWN_BASE = {"app/types.py": "class ApiError(Exception):\n    pass\n\n\ndef fail():\n    raise ApiError('x')\n"}
+OWN_PLAN = {"renamed": {"app/types.py:ApiError": "app/errors.py:ApiError"}, "new_files": ["app/errors.py"]}
+ERRORS = "class ApiError(Exception):\n    pass\n"
+
+
+@pytest.mark.parametrize("imp,ok", [
+    ("from app.errors import ApiError\n", True),                 # used by the old module's own code
+    ("from .errors import ApiError\n", True),                    # relative form
+    ("from app.errors import ApiError as ApiError\n", False),    # explicit re-export
+    ("from app.errors import ApiError\n__all__ = ['ApiError', 'fail']\n", False),   # listed
+    ("from app.other import ApiError\n", False),                 # not the rename's target module
+])
+def test_rename_old_module_may_import_what_it_uses(imp, ok):
+    head = {"app/types.py": imp + "\n\ndef fail():\n    raise ApiError('x')\n", "app/errors.py": ERRORS}
+    probs = check_reexport(OWN_BASE, head, OWN_PLAN)
+    assert (probs == []) == ok, probs
+    assert check(OWN_BASE, head, OWN_PLAN) != []           # without [gate] no_implicit_reexport: a shim
+
+
+def check_reexport(base, head, plan):
+    full = {"removed": [], "renamed": {}, "changed": [], "added": [], "new_files": [], "callers": [], **plan}
+    py = sorted({(p if p in base else None, p if p in head else None) for p in {*base, *head}}, key=str)
+    return public_api_problems(full, py, base, head, _public_api, None, ["src", "."], own_use_imports=True)[0]
+
+
+USE = "\n\ndef fail():\n    raise ApiError('x')\n"
+
+
+@pytest.mark.parametrize("head_types", [
+    "from app.errors import ApiError\n__all__ = ['fail']\n__all__.append('ApiError')\n" + USE,
+    "from app.errors import ApiError\n__all__ = ['fail']\n__all__ += ['ApiError']\n" + USE,
+    "from typing import TYPE_CHECKING\nfrom app.errors import ApiError\nif TYPE_CHECKING:\n"
+    "    from app.errors import ApiError as ApiError\n" + USE,
+    "from errors import ApiError\n" + USE,                    # an unrelated top-level `errors` module
+    "from app.errors import *\n" + USE,
+    "from app.errors import ApiError\n\n\ndef fail():\n    raise ValueError('x')\n",   # unused: a shim
+])
+def test_rename_reexport_probes_stay_bound(head_types):
+    head = {"app/types.py": head_types, "app/errors.py": ERRORS}
+    assert any("still bound" in p for p in check_reexport(OWN_BASE, head, OWN_PLAN))
+
+
+def test_rename_unused_import_and_package_init_stay_shims():
+    head = {"app/types.py": "from app.errors import ApiError\n\n\ndef fail():\n    raise ValueError('x')\n",
+            "app/errors.py": ERRORS}
+    assert any("still bound" in p for p in check_reexport(OWN_BASE, head, OWN_PLAN))
+    base = {"app/__init__.py": OWN_BASE["app/types.py"]}
+    head = {"app/__init__.py": "from app.errors import ApiError\n\n\ndef fail():\n    raise ApiError('x')\n",
+            "app/errors.py": ERRORS}
+    plan = {"renamed": {"app/__init__.py:ApiError": "app/errors.py:ApiError"}, "new_files": ["app/errors.py"]}
+    assert check_reexport(base, head, plan)
+
+
+def test_callers_import_inside_a_code_string_may_follow_the_rename():
+    code = ("SRC = '''\nimport sys\nfrom pkg.m import old\nprint(old(1))\n'''\n\n\n"
+            "def test():\n    run(SRC)\n")
+    head = code.replace("from pkg.m import old\nprint(old(1))", "from pkg.core.n import new\nprint(new(1))")
+    assert cpb(code, head) == []
+    other = code.replace("print(old(1))", "print(old(2))")              # beyond the plan inside the string
+    assert cpb(code, other)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("import pkg.m\n", "import pkg.other\n"),          # an import-time script now imports another module
+    ("import pkg.m\n", ""),                             # import deleted
+    ("x = 1  # noqa: E225\n\n", "x = 1\n"),            # comment and layout
+])
+def test_callers_code_string_other_changes_fail(old, new):
+    code = "SRC = '''\nimport sys\n" + old + "print(1)\n'''\n\n\ndef test():\n    run(SRC)\n"
+    assert cpb(code, code.replace(old, new))
+
+
+def test_worktree_crlf_reads_as_lf():
+    assert decode(b"a\r\nb\rc\n", newlines=True) == "a\nb\nc\n"
+    assert decode(b"a\r\nb\n") == "a\r\nb\n"

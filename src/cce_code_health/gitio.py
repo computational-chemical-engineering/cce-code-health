@@ -32,11 +32,29 @@ def ls_files(repo: Path, ref: str | None) -> list[str]:
     return [p for p in git(repo, "ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0") if p]
 
 
+class BinaryText(str):
+    """Text of a file that is binary: not strict UTF-8 (decoded with replacement) or holding a NUL
+    byte. A literal U+FFFD in valid UTF-8 is text."""
+
+
+def decode(data: bytes, newlines: bool = False) -> str:
+    """UTF-8 text; with `newlines`, \\r\\n and \\r become \\n (as `Path.read_text` does for the
+    working tree, where core.autocrlf may have written CRLF)."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("utf-8", errors="replace")
+        return BinaryText(text.replace("\r\n", "\n").replace("\r", "\n") if newlines else text)
+    if newlines:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return BinaryText(text) if "\0" in text else text
+
+
 def read_files(repo: Path, ref: str | None, paths: list[str]) -> dict[str, str]:
     if not paths:
         return {}
     if ref is None:
-        return {p: (repo / p).read_text(encoding="utf-8", errors="replace") for p in paths}
+        return {p: decode((repo / p).read_bytes(), newlines=True) for p in paths}
     out = git(repo, "cat-file", "--batch", input="".join(f"{ref}:{p}\n" for p in paths).encode())
     texts, pos = {}, 0
     for p in paths:
@@ -46,7 +64,7 @@ def read_files(repo: Path, ref: str | None, paths: list[str]) -> dict[str, str]:
             pos = nl + 1
             continue
         size = int(header[2])
-        texts[p] = out[nl + 1:nl + 1 + size].decode("utf-8", errors="replace")
+        texts[p] = decode(out[nl + 1:nl + 1 + size])
         pos = nl + 1 + size + 1
     return texts
 

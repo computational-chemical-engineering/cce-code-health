@@ -533,7 +533,9 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         hp_ = sorted({interface._split(n)[0] for n in plan.get("retargeted", {}).values()})
         hb_, hh_ = gitio.read_files(repo, base, hp_), gitio.read_files(repo, None, hp_)
         homes = {p: (hb_.get(p), hh_.get(p)) for p in hp_}
-        problems, record = interface.public_api_problems(plan, py, tb, th, _public_api, homes)
+        problems, record = interface.public_api_problems(
+            plan, py, tb, th, _public_api, homes, (cfg.architecture or {}).get("roots", ["src", "."]),
+            own_use_imports=g.get("no_implicit_reexport", False))
         c = Check("public_api", not problems, with_cpp("; ".join(problems[:5])))
         c.interface = record                       # old and new API text per planned change
         checks.append(c)

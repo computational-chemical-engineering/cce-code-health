@@ -110,7 +110,7 @@ def load(repo: Path, ref: str | None) -> Config:
 TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architecture", "docs"}
 HOOK_KEYS = {"enabled"}
 SCOPE_KEYS = {"include", "exclude"}
-GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "keep_going", "prefix",
+GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "no_implicit_reexport", "keep_going", "prefix",
              "env", "tier", "flags", "flag_patterns"}
 TIER_KEYS = {"name", "cadence", "kind", "cmd", "outputs", "tolerance", "timeout", "primary",
              "min_speedup", "max_slowdown", "metric", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit",
@@ -163,6 +163,14 @@ def check(text: str) -> tuple[list[str], list[str]]:
     if isinstance(data.get("profiles"), dict) and "cpp" in data["profiles"]:
         info += [f"WARNING [gate] {k} = true is not checked for C++ files (Python only; the check "
                  f"passes and says 'not checked')" for k in ("public_api", "literals") if gate.get(k)]
+    if not isinstance(gate.get("no_implicit_reexport", False), bool):
+        bad.append("[gate] no_implicit_reexport must be true or false")
+    elif gate.get("no_implicit_reexport") and not gate.get("public_api"):
+        bad.append("[gate] no_implicit_reexport needs public_api = true")
+    elif gate.get("no_implicit_reexport"):
+        info.append("[gate] no_implicit_reexport: an old module may keep a plain import of a moved name "
+                    "for its own code; only sound when a tier runs a type checker with "
+                    "no-implicit-reexport (mypy --strict) over every importer")
     tiers = gate.get("tier", [])
     names = [t.get("name") for t in tiers]
     bad += [f"duplicate tier name {n!r}" for n in sorted({n for n in names if names.count(n) > 1})]

@@ -445,6 +445,13 @@ in refactor mode, except:
   f.py at head; a new public name in it still needs its own `added` entry); `removed` takes it away.
   A listed change the step did not make fails. The check's JSON entry carries `interface`:
   the old and new API text of each planned change, for review.
+  With `[gate] no_implicit_reexport = true` (needs `public_api = true`; sound only when a tier
+  runs a type checker with no-implicit-reexport, such as mypy --strict, over every importer),
+  the old module of a rename or retarget may keep a plain `from <new home> import N` that its
+  own code reads: not a re-export under PEP 484. It still counts as a shim in an `__init__.py`,
+  when `__all__` lists N or is anything but one literal assignment, when any import of N in
+  the module (TYPE_CHECKING blocks too) has an alias or another source, when the module
+  star-imports from the home, or when nothing reads N.
 - `literals`: with `literals_added` or `literals_removed` in the plan, the string-literal multiset
   of the touched files may differ from base by exactly the declared entries (no globs, one file
   each), and each entry must hold in its own file (that file's count of the literal moved by at
@@ -462,8 +469,10 @@ in refactor mode, except:
   test expressions included), except that a statement using a removed name may be deleted (a
   compound one only when every non-trivial statement in it uses one) and the arguments of a
   call to a changed name may differ. Caller files may not be added, deleted or renamed (no new
-  `conftest.py`); binary caller files may not change; non-Python callers may only take the
-  renames. The check's JSON entry `callers` lists every deleted statement and the number of
+  `conftest.py`); binary caller files (not strict UTF-8, or holding NUL) may not change;
+  non-Python callers may only take the renames. Python source inside a multi-line string with an
+  import (a script a subprocess runs) is normalised like code, imports kept as their renamed
+  targets, and its line count and comments must match. The check's JSON entry `callers` lists every deleted statement and the number of
   changed calls. Not supported (rejected, rewrite by hand outside the gate): deleting a helper
   together with a removed test, star imports that hide a renamed name.
 - `literals`: the `__all__` elements of the files the plan names are left to `public_api`.

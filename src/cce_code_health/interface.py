@@ -40,7 +40,10 @@ from __future__ import annotations
 import ast
 import copy
 import difflib
+import io
 import re
+import textwrap
+import tokenize
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -305,9 +308,10 @@ def api(source: str, path: str, public_api) -> dict[str, str]:
     return out
 
 
-def bound(source: str) -> set[str]:
+def bound(source: str, skip=None) -> set[str]:
     """Every name bound at module level (imports included) and `Class.name` bound in a class
-    body: a name the plan removes must not survive as a shim in any of these forms."""
+    body: a name the plan removes must not survive as a shim in any of these forms. `skip(node,
+    alias)` leaves out the import aliases it accepts."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -322,7 +326,7 @@ def bound(source: str) -> set[str]:
                         out.add(f"{node.name}.{m.name}")
                     out |= {f"{node.name}.{t}" for t in _targets(m)}
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            out |= {(a.asname or a.name).split(".")[0] for a in node.names}
+            out |= {(a.asname or a.name).split(".")[0] for a in node.names if not (skip and skip(node, a))}
         else:
             out |= set(_targets(node))
     return out
@@ -338,13 +342,101 @@ def _all_problems(path: str, text: str, bound_names: set[str]) -> list[str]:
     return [f"plan added {path}:__all__: names not bound in the module at head: {missing}"] if missing else []
 
 
+def _import_module(node: ast.ImportFrom, path: str, roots) -> str | None:
+    """Dotted module of a `from ... import` in the file at `path`, relative imports resolved
+    against its package (module names from the config's source roots)."""
+    from .architecture import module_name  # noqa: PLC0415
+    if not node.level:
+        return node.module
+    m = module_name(path, roots)
+    if m is None:
+        return None
+    dotted, is_pkg = m
+    pkg = dotted.split(".") if is_pkg else dotted.split(".")[:-1]
+    if node.level - 1 > len(pkg):
+        return None
+    pkg = pkg[:len(pkg) - (node.level - 1)]
+    return ".".join(pkg + (node.module.split(".") if node.module else []))
+
+
+def _uses(tree: ast.Module, name: str) -> bool:
+    """`name` is read somewhere in the module's code (a Name load)."""
+    return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load) for n in ast.walk(tree))
+
+
+def _plain_all(tree: ast.Module) -> set[str] | None:
+    """The names of `__all__` when the module defines it only by one top-level literal
+    assignment and never touches it otherwise (append, extend, +=, nested assignment); else None."""
+    tops = [s for s in tree.body if isinstance(s, (ast.Assign, ast.AnnAssign))
+            and any(isinstance(x, ast.Name) and x.id == "__all__"
+                    for x in (s.targets if isinstance(s, ast.Assign) else [s.target]))]
+    mentions = sum(1 for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "__all__")
+    if not tops:
+        return set() if mentions == 0 else None
+    if len(tops) > 1 or mentions != 1 or tops[0].value is None:
+        return None
+    try:
+        return set(ast.literal_eval(tops[0].value))
+    except (ValueError, TypeError, SyntaxError):
+        return None
+
+
+def star_import_from(source: str, path: str, home: str, roots) -> bool:
+    """The module at `path` has `from <home module> import *` anywhere."""
+    from .architecture import module_name  # noqa: PLC0415
+    hm = module_name(home, roots)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return hm is not None and any(isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names)
+                                  and _import_module(n, path, roots) == hm[0] for n in ast.walk(tree))
+
+
+def bound_beyond_use(source: str, path: str, name: str, home: str, roots) -> bool:
+    """Whether `name` stays bound in the module at `path` other than by plain
+    `from <home> import name` (no alias) that the module's own code reads. Such an import is not
+    a re-export under PEP 484 / mypy's no-implicit-reexport. It still counts when the module is a
+    package `__init__.py`, when `__all__` lists the name or is not one plain literal, when any
+    import of the name anywhere in the module (TYPE_CHECKING blocks included) has an alias or
+    another source, when the module star-imports from home, or when the module never reads it."""
+    from .architecture import module_name  # noqa: PLC0415
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return True
+    hm = module_name(home, roots)
+    all_names = _plain_all(tree)
+    if (Path(path).name == "__init__.py" or hm is None or all_names is None or name in all_names
+            or not _uses(tree, name)):
+        return name in bound(source)
+    home_mod = hm[0]
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            src = _import_module(n, path, roots)
+            for a in n.names:
+                if a.name == "*" and src == home_mod:
+                    return True
+                if (a.asname or a.name) == name and (a.asname is not None or src != home_mod or a.name != name):
+                    return True
+        elif isinstance(n, ast.Import) and any((a.asname or a.name.split(".")[0]) == name for a in n.names):
+            return True
+
+    def own_use(node, a):
+        return isinstance(node, ast.ImportFrom) and a.name == name and a.asname is None
+    return name in bound(source, skip=own_use)
+
+
 # -- the exact public-API rule -----------------------------------------------------------------
 
 def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
-                        homes: dict | None = None) -> tuple[list[str], dict]:
+                        homes: dict | None = None, roots=("src", "."),
+                        own_use_imports: bool = False) -> tuple[list[str], dict]:
     """Exact interface rule over the touched in-scope (base path, head path) pairs; returns
     (problems, record) where record lists each planned change with its old and new API text.
-    `homes`: {path: (base text, head text)} of each `retargeted` home module."""
+    `homes`: {path: (base text, head text)} of each `retargeted` home module. With
+    `own_use_imports` ([gate] no_implicit_reexport = true) the old module of a rename or retarget
+    may keep a plain import of the name from its new home for its own code (`bound_beyond_use`)."""
     api_b = {bp: api(tb[bp], bp, public_api) for bp, _ in py if bp in tb}
     api_h = {hp: api(th[hp], hp, public_api) for _, hp in py if hp in th}
     bound_h = {hp: bound(th[hp]) for hp in api_h}
@@ -386,8 +478,12 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
                 new.setdefault(hp, {})[k] = s
     problems = []
 
-    def still_bound(path, name):
-        return path in bound_h and name in bound_h[path]
+    def still_bound(path, name, home=None):
+        if home is not None and path in th and star_import_from(th[path], path, home, roots):
+            return True                        # `from <home> import *` re-binds every moved name
+        if path not in bound_h or name not in bound_h[path]:
+            return False
+        return home is None or not own_use_imports or bound_beyond_use(th[path], path, name, home, roots)
 
     # module renames: the whole API (including __all__) moves unchanged
     for old, nw in ren_mod.items():
@@ -411,7 +507,7 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
     # name renames: old gone (no shim), new present, same API; members follow the top name
     for po, no, pn, nn in ren:
         g, h = gone.get(po, {}), new.get(pn, {})
-        if no not in g or still_bound(po, no):
+        if no not in g or still_bound(po, no, home=pn if no == nn else None):
             problems.append(f"plan renamed {po}:{no} = {pn}:{nn}: {no} is still bound in {po}")
             continue
         if nn not in h:
@@ -436,7 +532,7 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
         hb, hh = (homes or {}).get(ph, (None, None))
         ab = api(hb, ph, public_api) if hb is not None else {}
         ah = api(hh, ph, public_api) if hh is not None else {}
-        if no not in g or still_bound(po, no):
+        if no not in g or still_bound(po, no, home=ph if no == nh else None):
             problems.append(f"plan retargeted {o} = {n}: {no} is still bound in {po}")
             continue
         if nh not in ab or ab.get(nh) != ah.get(nh):
@@ -573,6 +669,17 @@ def _scope_bindings(body: list) -> dict[str, str]:
     return out
 
 
+def _source_with_imports(value) -> ast.Module | None:
+    """The parsed module when a string constant is multi-line Python source with an import."""
+    if not (isinstance(value, str) and "\n" in value and "import" in value):
+        return None
+    try:
+        tree = ast.parse(textwrap.dedent(value))
+    except (SyntaxError, ValueError):
+        return None
+    return tree if any(isinstance(n, (ast.Import, ast.ImportFrom)) for n in tree.body) else None
+
+
 class _Normalise(ast.NodeTransformer):
     """Replace import-bound names by ⟨target⟩ tokens (renamed with `renames`), drop imports."""
 
@@ -630,6 +737,10 @@ class _Normalise(ast.NodeTransformer):
     def visit_Constant(self, node):
         if isinstance(node.value, str) and _DOTTED.match(node.value) and node.value.split(".")[0] in self.tops:
             return ast.Constant(value=f"⟨{_ren(node.value, self.renames)}⟩")
+        code = _source_with_imports(node.value)
+        if code is not None:                   # Python source in a string (run by a subprocess)
+            return ast.Constant(value="⟨code⟩" + repr(_layout(node.value))
+                                + ast.dump(_NormaliseCode(self.renames, self.tops).visit(code)))
         return node
 
     def visit_Call(self, node):
@@ -663,6 +774,36 @@ def _hits(targets: set[str], wanted: set[str]) -> bool:
 def _uses_removed(node, removed: set[str], members: set[str]) -> bool:
     return _hits(_token_targets(node), removed) or any(
         isinstance(n, ast.Attribute) and n.attr in members for n in ast.walk(node))
+
+
+class _NormaliseCode(_Normalise):
+    """For Python source inside a string: as _Normalise, but every import stays, as the tokens of
+    its (renamed) targets, so an import changed to another module or deleted is a difference."""
+
+    def visit_Import(self, node):
+        targets = []
+        for a in node.names:
+            if isinstance(node, ast.ImportFrom):
+                d = "." * node.level + (node.module or "") + "." + a.name
+            else:
+                d = a.name
+            targets.append(ast.Name(id=f"⟨{_ren(d, self.renames)}⟩" + (f" as {a.asname}" if a.asname else ""),
+                                    ctx=ast.Load()))
+        return ast.Expr(value=ast.Tuple(elts=targets, ctx=ast.Load()))
+
+    visit_ImportFrom = visit_Import
+
+
+def _layout(value: str) -> tuple:
+    """Line count and comments of Python source in a string (the AST drops both)."""
+    comments = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(textwrap.dedent(value)).readline):
+            if tok.type == tokenize.COMMENT:
+                comments.append(tok.string)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    return value.count("\n"), tuple(comments)
 
 
 class _ClearChanged(ast.NodeTransformer):
@@ -770,7 +911,7 @@ def _callers(plan, callers, tb, th, roots):
             continue
         if bp not in tb or hp not in th:
             continue
-        if "�" in tb[bp] + th[hp]:
+        if isinstance(tb[bp], gitio.BinaryText) or isinstance(th[hp], gitio.BinaryText):
             out.append(f"{hp}: binary caller file may not change")
             continue
         if not bp.endswith(".py"):
