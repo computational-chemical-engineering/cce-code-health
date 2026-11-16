@@ -55,6 +55,7 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - OFS S19 W4 step 197 defect (2026-11-16, fixed): duplication counted the name lists of `from x import (...)` (column.py dup_lines 32 -> 41 crossed 10 % on an import-only retarget). Clone detection now leaves out whole import statements (paren lists, backslash continuations), as CPD ignore-imports; step 197 now 32 -> 32. 340 tests.
 - v0.2.0 TAGGED 2026-11-16 (user form decision: after dem S5 + OFS W4; OFS W4 merged into wp/S19 as 7ffa7901). Plugin 0.2.0, README install @v0.2.0. Open request from OFS: a behaviour-only merge-check mode for gate (interface lanes fail static checks by construction).
 - OFS S19 request (2026-11-16, done): `gate --behaviour-only` merge-check (tiers only over base..head, no static checks, debt reported not gated, base config, note `tier_config` if head [gate] differs, log refuses). Retires S19's merge_tiers.sh. 343 tests.
+- peclet_health status (2026-11-16): dem S9 landed (PR #14, dem 9c36779); flow F1+F2 landed (PRs #15, #16, flow ed61f38), F3 in CI (PR #17) on 719092b; flow debt 5799.4 -> 5558.9, brain 48 -> 42, bitwise incl. GPU. Re-pins @v0.2.0 next round.
 - Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 
