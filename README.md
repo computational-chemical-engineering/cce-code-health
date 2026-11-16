@@ -178,7 +178,10 @@ deterministic. A reference tier with `coverage = true` must execute every change
 (coverage.py, installed in the command's interpreter). In optimize mode the primary benchmark is
 accepted when the 95 % distribution-free lower bound of the median paired speedup reaches
 `min_speedup`; if only the median does, ABBA rounds are added up to `max_repeat` (default
-4 x `repeat`). An informational `numeric-literals` check lists numeric constants removed or
+4 x `repeat`). A benchmark tier's `metric` picks what is timed: `"wall"` (default), `"cpu"`
+(the children's user+sys CPU seconds, which a loaded machine inflates far less; it misses I/O,
+GPU and sleep, and counts every thread, so a parallel speedup does not show) or `"both"` (a
+slowdown guard fails only when both slow down; a speedup claim needs both). An informational `numeric-literals` check lists numeric constants removed or
 added. `[gate] prefix` prepends a shell prefix to every tier command; `{gitdir}` and `{repo}`
 work in `prefix` and `[gate.env]`.
 With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3. The base worktree

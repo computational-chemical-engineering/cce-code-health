@@ -122,3 +122,34 @@ def test_benchmark_writing_into_tree_fails(repo, capsys):
     set_config(repo, cfg)
     assert gate(repo, "refactor") == 1
     assert "wrote into the tree" in capsys.readouterr().out
+
+
+BURN = '"import pkg.mod as m, time; sum(range(3000000)); time.sleep(m.DELAY)"'
+
+
+def metric_config(metric, slowdown="0.3"):
+    return (CONFIG.replace('"import pkg.mod as m, time; time.sleep(m.DELAY)"', BURN)
+            .replace("max_slowdown = 0.05", f"max_slowdown = {slowdown}\nmetric = \"{metric}\""))
+
+
+@pytest.mark.parametrize("metric,refactor_rc", [("wall", 1), ("cpu", 0), ("both", 0)])
+def test_benchmark_metric_slow_wall_same_cpu(repo, capsys, metric, refactor_rc):
+    commit(repo, {".codehealth/config.toml": metric_config(metric)})
+    edit(repo, b=("DELAY = 0.2", "DELAY = 0.6"))           # waits longer, same CPU (a loaded machine)
+    assert gate(repo, "refactor") == refactor_rc
+    out = capsys.readouterr().out
+    assert ("cpu speedup" in out) == (metric != "wall")
+
+
+@pytest.mark.parametrize("metric,optimize_rc", [("wall", 0), ("cpu", 1), ("both", 1)])
+def test_benchmark_metric_speedup_claim(repo, metric, optimize_rc):
+    commit(repo, {".codehealth/config.toml": metric_config(metric)})
+    edit(repo, b=("DELAY = 0.2", "DELAY = 0.02"))          # wall faster, CPU unchanged: no CPU speedup
+    assert gate(repo, "optimize") == optimize_rc
+
+
+def test_metric_only_for_benchmarks(repo, capsys):
+    bad = CONFIG.replace('outputs = ["r.txt"]', 'outputs = ["r.txt"]\nmetric = "cpu"')
+    commit(repo, {".codehealth/config.toml": bad})
+    assert main(["config", "--check", "--repo", str(repo)]) != 0
+    assert "metric is for benchmark tiers" in capsys.readouterr().out

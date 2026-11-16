@@ -37,6 +37,7 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     max_repeat = 20                   # most pairs when extending (default 4 * repeat)
     min_speedup = 1.2
     max_slowdown = 0.03               # every other benchmark tier: may not slow down beyond this
+    metric = "wall"                   # "cpu": children user+sys CPU time; "both": see below
 
 Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted, any
 type: docs and data too) and {files:GLOB[,GLOB]} (only those matching, e.g. {files:*.py} for a linter;
@@ -85,6 +86,11 @@ order statistics: the k-th smallest ratio for the largest k with P(Binomial(n, 0
 0.05; n < 5 is "insufficient" and gives the minimum) reaches min_speedup. If only the median
 does, ABBA rounds (2 runs per side) are added until the bound passes or n reaches `max_repeat`.
 The detail reports median, bound, n and whether rounds were extended.
+`metric` (benchmark tiers): "wall" (default) times each run by the wall clock; "cpu" uses the
+children's user+sys CPU seconds of the run instead (same pairing, ratios and bounds), which a
+loaded machine inflates far less, but which misses waiting (I/O, GPU, sleeping) and counts every
+thread (a parallel speedup shows as no gain or a loss); "both" computes both: a slowdown guard
+fails only when both medians fail, a speedup claim (optimize, primary) passes only when both pass.
 
 Informational check `numeric-literals` (always ok): per touched in-scope .py file the numeric
 constants (int, float, complex; not bool) removed or added between --base and head, at most 10
@@ -1036,12 +1042,12 @@ def speedup_lower_bound(ratios, confidence: float = 0.95) -> tuple[float, bool]:
     return xs[k - 1], False
 
 
-def _bench_detail(ratios, times, cpu, extra="") -> str:
-    return (f"speedup {statistics.median(ratios):.3f} (paired min {min(ratios):.3f}, max {max(ratios):.3f}, "
+def _bench_detail(ratios, times, cpu, extra="", label="") -> str:
+    return (f"{label}speedup {statistics.median(ratios):.3f} (paired min {min(ratios):.3f}, max {max(ratios):.3f}, "
             f"n={len(ratios)}{extra}; "
             f"base median {statistics.median(times['base']):.3g} s, head median "
             f"{statistics.median(times['head']):.3g} s; load1 {os.getloadavg()[0]:.2f}; "
-            f"children cpu base {cpu['base']:.3g} s, head {cpu['head']:.3g} s)")
+            f"children cpu base {sum(cpu['base']):.3g} s, head {sum(cpu['head']):.3g} s)")
 
 
 def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
@@ -1056,7 +1062,8 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
         rc, _, _, _ = _bench_run(t, cwd, args["base"], args["files"], args["env"], args["log"])
         if rc != 0:
             return False, f"exit {rc} at {side} (warm-up)"
-    times, cpu = {"base": [], "head": []}, {"base": 0.0, "head": 0.0}
+    times, cpu = {"base": [], "head": []}, {"base": [], "head": []}
+    metric = t.get("metric", "wall")
 
     def pairs(count: int) -> str:
         for i in range(count):
@@ -1068,11 +1075,18 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
                 if note:
                     return f"{note} ({side})"
                 times[side].append(sec)
-                cpu[side] += c
+                cpu[side].append(c)
         return ""
 
-    def ratios():
-        return [b / h if h else float("inf") for b, h in zip(times["base"], times["head"])]
+    series = {"wall": times, "cpu": cpu}
+    used = ("wall", "cpu") if metric == "both" else (metric,)
+
+    def ratios(m):
+        s = series[m]
+        return [b / h if h else float("inf") for b, h in zip(s["base"], s["head"])]
+
+    def detail(m, r, extra=""):
+        return _bench_detail(r, series[m], cpu, extra, "" if metric == "wall" else f"{m} ")
 
     err = pairs(repeat)
     if err:
@@ -1082,22 +1096,28 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
         max_repeat = int(t.get("max_repeat", 4 * repeat))
         extended = False
         while True:
-            r = ratios()
-            median = statistics.median(r)
-            bound, insufficient = speedup_lower_bound(r)
-            if bound >= need or median < need or len(r) + 2 > max_repeat:
+            rs = {m: ratios(m) for m in used}
+            bounds = {m: speedup_lower_bound(r) for m, r in rs.items()}
+            passed = all(b >= need for b, _ in bounds.values())
+            hopeless = any(statistics.median(r) < need for r in rs.values())
+            if passed or hopeless or len(rs[used[0]]) + 2 > max_repeat:
                 break
             err = pairs(2)
             if err:
                 return False, err
             extended = True
-        extra = (f", lower bound {bound:.3f} at 95%" + (" (n too small)" if insufficient else "")
-                 + (f", extended from {repeat} to {len(r)} rounds" if extended else ""))
-        return bound >= need, _bench_detail(r, times, cpu, extra) + f", need >= {need}"
-    r = ratios()
+        parts = []
+        for m in used:
+            bound, insufficient = bounds[m]
+            extra = (f", lower bound {bound:.3f} at 95%" + (" (n too small)" if insufficient else "")
+                     + (f", extended from {repeat} to {len(rs[m])} rounds" if extended else ""))
+            parts.append(detail(m, rs[m], extra))
+        return passed, "; ".join(parts) + f", need >= {need}" + (" (both)" if metric == "both" else "")
     allowed = float(t.get("max_slowdown", 0.03))
-    return (statistics.median(r) >= 1 / (1 + allowed),
-            _bench_detail(r, times, cpu) + f", max slowdown {allowed:.0%}")
+    oks = {m: statistics.median(ratios(m)) >= 1 / (1 + allowed) for m in used}
+    return (any(oks.values()),
+            "; ".join(detail(m, ratios(m)) for m in used) + f", max slowdown {allowed:.0%}"
+            + (" (fails only if both slow down)" if metric == "both" else ""))
 
 
 # -- build-tool tiers (C++): skip_exit, fail_regex, findings, convergence ---------------------
