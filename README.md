@@ -115,7 +115,7 @@ parameters above 5, weight 1. A brain function has CCN > 25 and NLOC > 70. Bindi
 (`NB_MODULE`, `PYBIND11_MODULE`, `BOOST_PYTHON_MODULE`) are flat registration tables: their
 length carries no debt and does not make them brain functions; their CCN still counts. File smells as for
 Python: large above 1000 NLOC, huge above 2000, duplication above 10 % (8-line windows,
-comments ignored). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
+comments and import statements ignored, `from x import (...)` name lists included). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
 towards the enclosing function. Captures are not counted: a lambda that captures the caller's
 locals by reference (`[&]`) is as coupled as a long parameter list, but scores none of it. Nesting is computed by codehealth, not lizard: if, for, while,
 do, switch and try open a level, braced or not; `else if`, else and catch do not. Suppressions
