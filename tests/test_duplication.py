@@ -26,3 +26,11 @@ def test_code_after_an_import_list_still_counts():
 def test_prose_starting_with_from_is_not_an_import():
     t = '"""\nfrom the reference (see eq. 3\nthe rest\n"""\nx = 1\n'
     assert "the rest" in code_lines(t) and "x = 1" in code_lines(t)
+
+
+def test_all_declarations_are_left_out():
+    names = "\n".join(f'    "name_{i}",' for i in range(12))
+    a = f"from .seg import (\n{NAMES}\n)\n\n__all__ = [\n{names}\n]\n"
+    b = f"__all__ = [\n{names}\n]\n__all__ += ['x']\n__all__: list[str] = ('y',\n    'z')\n\ndef f():\n    return 1\n"
+    assert duplicated_lines({"a.py": a, "b.py": b}, 8) == {}
+    assert code_lines(b) == ["def f():", "return 1"]

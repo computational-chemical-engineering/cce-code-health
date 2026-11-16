@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import importlib.metadata
 import json
 import re
 import sys
@@ -91,10 +92,21 @@ def group_totals(reports: dict[str, dict], depth: int) -> dict[str, dict]:
     return {g: totals(rs) for g, rs in sorted(by.items())}
 
 
+def backends() -> dict:
+    """Installed versions of the metric backends (scores depend on them; None: not installed)."""
+    out = {}
+    for name in ("complexipy", "lizard"):
+        try:
+            out[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            out[name] = None
+    return out
+
+
 def meta(repo: Path, cfg: config.Config, **extra) -> dict:
     langs = {"profiles": {k: p.name for k, p in cfg.other_profiles.items()}} if cfg.other_profiles else {}
-    return {"tool": "cce-code-health", "version": __version__, "profile": cfg.profile.name, **langs,
-            "config": cfg.source, "repo": repo.name, **extra}
+    return {"tool": "cce-code-health", "version": __version__, "backends": backends(),
+            "profile": cfg.profile.name, **langs, "config": cfg.source, "repo": repo.name, **extra}
 
 
 def write_json(path: str | None, data: dict) -> None:
@@ -435,7 +447,8 @@ def cmd_gate(a) -> int:
                                           behaviour_only=a.behaviour_only)
     if revert:
         revert = [gitio.rev(repo, s) for s in revert if _resolves(repo, s)]
-    write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
+    write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "backends": backends(),
+                                 "base": base,
                                  "ref_base": ref_base, "head": head, "revert": revert, "cadence": a.cadence, "mode": a.mode,
                                  "log": str(log), **info, "require_gain": a.require_gain,
                                  "trial": bool(a.config), "behaviour_only": a.behaviour_only,

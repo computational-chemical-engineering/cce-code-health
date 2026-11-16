@@ -9,7 +9,9 @@ description = "Code-health metrics, CI ratchet and tooling for a behaviour-prese
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["complexipy>=8"]
+# complexipy is pinned: profile python@0 is frozen, and complexipy 9 scores cognitive complexity
+# differently (pymrm coupling.py: 91.9 under 8.3.0, 43.9 under 9.0.0). A new major goes with a new profile.
+dependencies = ["complexipy==8.3.0"]
 
 [project.optional-dependencies]
 cpp = ["lizard>=1.17"]
