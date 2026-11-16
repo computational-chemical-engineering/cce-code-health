@@ -57,6 +57,7 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - OFS S19 request (2026-11-16, done): `gate --behaviour-only` merge-check (tiers only over base..head, no static checks, debt reported not gated, base config, note `tier_config` if head [gate] differs, log refuses). Retires S19's merge_tiers.sh. 343 tests.
 - peclet_health status (2026-11-16): dem S9 landed (PR #14, dem 9c36779); flow F1+F2 landed (PRs #15, #16, flow ed61f38), F3 in CI (PR #17) on 719092b; flow debt 5799.4 -> 5558.9, brain 48 -> 42, bitwise incl. GPU. Re-pins @v0.2.0 next round.
 - OFS S19 W4 run 7 request (2026-11-16, done): interface plans accept `added = ["f.py:__all__"]` (existing module gains __all__; literal list, every name bound at head) and `removed = ["f.py:__all__"]`. 345 tests.
+- pymrm adopter (2026-11-16): session pymrm-health (uds 2763865, ~/Code/pymrm_suite/pymrm) starts a health campaign with the public interface frozen. Onboarded (commands, metrics, config sketch with public_api = true). My read-only default-scope scan: 65 files, debt 1425.8, health 8.03, brain 8; src/pymrm 15 files, debt 1282.8 (solve.py 545.0). No baseline existed before.
 - Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 
