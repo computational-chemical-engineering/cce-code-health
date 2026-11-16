@@ -146,12 +146,23 @@ def test_empty_diff_fails(repo, capsys):
 
 def test_trial_config_exits_3(repo, capsys):
     trial = repo.parent / "trial.toml"
-    trial.write_text(CONFIG)
+    trial.write_text(CONFIG + "# trial\n")
     doc_edit(repo)
     assert gate(repo, "--config", str(trial)) == 3
     assert "GATE TRIAL" in capsys.readouterr().out
     edit(repo, "pkg/mod.py", MOD.replace("x * 3 + 1", "x * 3 + 2"))
     assert gate(repo, "--config", str(trial)) == 1
+
+
+def test_config_identical_to_base_is_not_a_trial(repo, capsys):
+    same = repo.parent / "same.toml"
+    same.write_bytes((repo / ".codehealth/config.toml").read_bytes())
+    doc_edit(repo)
+    assert gate(repo, "--config", str(same)) == 0
+    out = capsys.readouterr().out
+    assert "GATE PASS" in out and "identical to the base's committed config" in out
+    gate(repo, "--config", str(same), "--json", str(repo.parent / "g.json"))
+    assert json.loads((repo.parent / "g.json").read_text())["meta"]["trial"] is False
 
 
 def test_refactor_without_reference_or_command_tier_fails(repo, capsys):

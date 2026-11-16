@@ -247,7 +247,7 @@ def test_log_refuses_self_test_and_trial_json(repo, tmp_path):
     assert log(repo, "st.json") == 2
     doc_edit(repo)
     trial = repo.parent / "trial.toml"
-    trial.write_text(CONFIG)
+    trial.write_text(CONFIG + "# trial\n")
     assert gate(repo, "--config", str(trial), "--json", str(repo.parent / "t.json")) == 3
     assert log(repo, "t.json") == 2
 

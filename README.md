@@ -184,7 +184,8 @@ GPU and sleep, and counts every thread, so a parallel speedup does not show) or 
 slowdown guard fails only when both slow down; a speedup claim needs both). An informational `numeric-literals` check lists numeric constants removed or
 added. `[gate] prefix` prepends a shell prefix to every tier command; `{gitdir}` and `{repo}`
 work in `prefix` and `[gate.env]`.
-With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3. The base worktree
+With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3; a `--config` file
+byte-identical to the base's committed `.codehealth/config.toml` is not a trial. The base worktree
 lives under `<git-common-dir>/codehealth/`.
 
 ```bash

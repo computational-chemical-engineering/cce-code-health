@@ -174,7 +174,8 @@ instead, and the frozen check says so.
 
 Empty gates fail: an empty diff at cadence step; optimize mode without a reference tier or
 without a primary benchmark tier with min_speedup; refactor mode without a reference or
-command tier. With `--config` (a trial) a passing gate exits 3, not 0.
+command tier. With `--config` (a trial) a passing gate exits 3, not 0 (the CLI drops a --config
+byte-identical to the base's committed config, so that is not a trial).
 
 Self-test: `codehealth gate --self-test [--mutate path:line]` mutates one numeric literal in an
 in-scope file of a temporary worktree at HEAD and runs the reference and command tiers there

@@ -428,6 +428,23 @@ def _resolves(repo: Path, ref: str) -> bool:
         return False
 
 
+def _gate_override(repo: Path, base_ref: str, path: str | None) -> Path | None:
+    """The --config file as an override, or None when it is byte-identical to the config committed
+    at the gate's base (then the gate is exactly the committed one, not a trial)."""
+    if not path:
+        return None
+    p = Path(path).resolve()
+    try:
+        committed = gitio.git(repo, "cat-file", "blob",
+                              f"{gitio.merge_base(repo, base_ref, 'HEAD')}:{config.CONFIG_PATH}")
+    except gitio.GitError:
+        return p
+    if committed != p.read_bytes():
+        return p
+    print(f"  note: --config {path} is identical to the base's committed config: not a trial")
+    return None
+
+
 def cmd_gate(a) -> int:
     repo = Path(a.repo).resolve()
     log = Path(a.log) if a.log else Path(tempfile.gettempdir()) / f"codehealth-gate-{repo.name}.log"
@@ -440,8 +457,9 @@ def cmd_gate(a) -> int:
     head = (gitio.rev(repo, "HEAD")
             if head_tree == gitio.git(repo, "rev-parse", "HEAD^{tree}").decode().strip() else "worktree")
     info: dict = {}
+    override = _gate_override(repo, a.base, a.config)
     checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
-                                          Path(a.config).resolve() if a.config else None, a.mode,
+                                          override, a.mode,
                                           a.ref_base, require_gain=a.require_gain, info=info,
                                           revert=revert, head_tree=head_tree, plan=a.plan,
                                           behaviour_only=a.behaviour_only)
@@ -451,7 +469,7 @@ def cmd_gate(a) -> int:
                                  "base": base,
                                  "ref_base": ref_base, "head": head, "revert": revert, "cadence": a.cadence, "mode": a.mode,
                                  "log": str(log), **info, "require_gain": a.require_gain,
-                                 "trial": bool(a.config), "behaviour_only": a.behaviour_only,
+                                 "trial": override is not None, "behaviour_only": a.behaviour_only,
                                  "head_tree": head_tree},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
@@ -459,15 +477,15 @@ def cmd_gate(a) -> int:
             c.detail[:DETAIL_CHARS] + f" ... ({len(c.detail)} chars{'; full detail in --json' if not a.json else ''})")
         print(f"  {'ok  ' if c.ok else 'FAIL'} {c.name:12} {c.seconds:7.1f} s  {detail}")
     failed = [c.name for c in checks if not c.ok]
-    verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
+    verdict = "FAIL" if failed else "TRIAL" if override else "PASS"
     print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
           f"head={head[:10]} mode={a.mode}{' (behaviour only)' if a.behaviour_only else ''} cadence={a.cadence} "
           f"debt={info['debt_before']}->{info['debt_after']}"
           + (f" revert={len(revert)}" if revert else "")
           + f": {len(checks) - len(failed)}/{len(checks)} checks passed"
           + (f", failed: {', '.join(failed)}" if failed else "")
-          + (" [TRIAL: config override, not valid as CI evidence]" if a.config else "") + f" (log {log})")
-    return 1 if failed else 3 if a.config else 0
+          + (" [TRIAL: config override, not valid as CI evidence]" if override else "") + f" (log {log})")
+    return 1 if failed else 3 if override else 0
 
 
 DETAIL_CHARS = 600   # console line per check; the gate JSON keeps the full detail
