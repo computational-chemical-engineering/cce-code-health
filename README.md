@@ -422,6 +422,8 @@ in refactor mode, except:
   members, constant value, re-export source); `changed` names keep name and module but their
   API must differ; an addition must be in `added` or be a rename's new side; any other
   difference fails, and `__all__` may change only by the names the plan lists for that file.
+  `added = ["f.py:__all__"]` gives an existing module an `__all__` (a literal list of names bound in
+  f.py at head; a new public name in it still needs its own `added` entry); `removed` takes it away.
   A listed change the step did not make fails. The check's JSON entry carries `interface`:
   the old and new API text of each planned change, for review.
 - `literals`: with `literals_added` or `literals_removed` in the plan, the string-literal multiset

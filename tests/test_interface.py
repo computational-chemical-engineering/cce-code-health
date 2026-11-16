@@ -450,3 +450,33 @@ def test_behaviour_only_refuses_plan_modes_and_gain(repo, capsys):
     assert merge_check(repo, "--mode", "interface", "--plan", PLAN_PATH) == 2
     assert merge_check(repo, "--require-gain") == 2
     assert "merge-check" in capsys.readouterr().err
+
+
+def test_rule_planned_all_added_and_removed():
+    src = "from x import y\n\n\ndef a():\n    pass\n\n\ndef _h():\n    pass\n"
+    base = {"m.py": src}
+    head = {"m.py": src + '\n__all__ = ["a", "y"]\n'}
+    assert check(base, head, {}) == ["m.py: __all__ added (not in the plan)"]
+    assert check(base, head, {"added": ["m.py:__all__"]}) == []
+    assert check(head, base, {"removed": ["m.py:__all__"]}) == []
+    assert check(head, base, {}) == ["m.py: __all__ removed (not in the plan)"]
+    bad = {"m.py": src + '\n__all__ = ["a", "nope"]\n'}
+    assert check(base, bad, {"added": ["m.py:__all__"]}) == [
+        "plan added m.py:__all__: names not bound in the module at head: ['nope']"]
+    dyn = {"m.py": src + '\n__all__ = [n for n in dir() if n[0] != "_"]\n'}
+    assert check(base, dyn, {"added": ["m.py:__all__"]})[0].startswith(
+        "plan added m.py:__all__: it must be a literal list")
+    new_name = {"m.py": src + '\n\ndef b():\n    pass\n\n__all__ = ["a", "b"]\n'}
+    assert check(base, new_name, {"added": ["m.py:__all__"]}) == ["m.py: b added (not in the plan)"]
+    assert check(base, new_name, {"added": ["m.py:__all__", "m.py:b"]}) == []
+
+
+def test_gate_accepts_planned_all_on_existing_module(repo, capsys):
+    (repo / ".codehealth/interface/all.toml").write_text(
+        'id = "all-1"\napproved_by = "reviewer"\nreason = "declare the API"\nadded = ["pkg/compat.py:__all__"]\n')
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "plan")
+    (repo / "pkg/compat.py").write_text('__all__ = ["shim"]\n\n\ndef shim():\n    return 1\n')
+    assert gate(repo, plan=".codehealth/interface/all.toml") == 0
+    out = capsys.readouterr().out
+    assert "ok   public_api" in out and "ok   literals" in out

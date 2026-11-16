@@ -12,7 +12,8 @@ mode needs `[gate] public_api = true` (usage error otherwise):
     renamed = {"src/pkg/a.py:Solver" = "src/pkg/core/solver.py:Solver",   # path:Name -> path:Name
                "src/pkg/b.py" = "src/pkg/core/b.py"}                      # module -> module
     changed = ["src/pkg/run.py:run"]              # same name and module, new signature
-    added = ["src/pkg/core/solver.py:make_solver"]   # new public names that are not renames
+    added = ["src/pkg/core/solver.py:make_solver",   # new public names that are not renames
+             "src/pkg/run.py:__all__"]       # __all__ given to an existing module (removed: taken away)
     new_files = ["src/pkg/core/*.py"]             # globs; added files must match one
     callers = ["tests/**", "docs/examples/**"]    # out-of-scope or forbidden files that follow
 
@@ -27,6 +28,10 @@ Static rules that differ from refactor mode:
   rewritten into one of the same kind that still names it. Imports follow the renames. No
   caller file is added, deleted or renamed.
 - `literals`: the elements of `__all__` in the files the plan names are left to `public_api`.
+- `__all__`: changes only by the names the plan lists for that file. `added = ["f.py:__all__"]`
+  gives an existing module an `__all__`; it must be a literal list whose every name is bound in
+  f.py at head (no new public name comes in by it: those need their own `added` entries).
+  `removed = ["f.py:__all__"]` takes it away.
 Tiers run as in refactor mode. `codehealth log` records class `interface`; accepted needs all
 checks ok and needs no debt drop (the API change is the purpose; debt still may not rise).
 """
@@ -323,6 +328,16 @@ def bound(source: str) -> set[str]:
     return out
 
 
+def _all_problems(path: str, text: str, bound_names: set[str]) -> list[str]:
+    """An `__all__` the plan adds: a literal list of names bound in the module at head."""
+    try:
+        names = ast.literal_eval(text)
+    except (ValueError, SyntaxError):
+        return [f"plan added {path}:__all__: it must be a literal list of names ({text})"]
+    missing = sorted(n for n in names if n not in bound_names)
+    return [f"plan added {path}:__all__: names not bound in the module at head: {missing}"] if missing else []
+
+
 # -- the exact public-API rule -----------------------------------------------------------------
 
 def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
@@ -439,6 +454,8 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
                 problems.append(f"plan removed {p}:{n}: still bound at head (or the file is not touched)")
             else:
                 record["removed"].append({"name": f"{p}:{n}", "api": gone[p][n]})
+                if n == "__all__":
+                    gone[p].pop(n)
     for p, ns in sorted(changed.items()):
         for n in sorted(ns):
             if n not in diffs.get(p, {}):
@@ -450,8 +467,10 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
         for n in sorted(ns):
             if n not in new.get(p, {}):
                 problems.append(f"plan added {p}:{n}: not new at head")
-            else:
-                record["added"].append({"name": f"{p}:{n}", "api": new[p][n]})
+                continue
+            record["added"].append({"name": f"{p}:{n}", "api": new[p][n]})
+            if n == "__all__":
+                problems += _all_problems(p, new[p].pop(n), bound_h.get(p, set()))
 
     # __all__ may change only by the names listed for that file
     def listed_names(path):
