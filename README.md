@@ -126,7 +126,7 @@ use `// codehealth: allow ccn,nesting -- reason` on the line above the declarati
 `literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static
 rules (public headers, literals) are not implemented yet, and C++ files are skipped there.
 
-## Behaviour gate (0.2.0.dev)
+## Behaviour gate (0.2)
 
 ```bash
 codehealth gate --base main                    # refactor mode: bitwise references, no slowdown
@@ -192,6 +192,13 @@ Gate JSON `meta.head` is the HEAD sha when the worktree equals HEAD (a committed
 Gate JSON `meta` records `debt_before`, `debt_after`, `require_gain`, `trial` and `head_tree` (tree sha of
 the judged worktree); each check records `exit_code`. `codehealth gate --require-gain` adds a static
 check `gain` that fails unless debt over the touched files dropped.
+
+`codehealth gate --behaviour-only` is a merge-check for a lane whose steps were each gated: over
+`--base..head` it runs the config checks and the tiers of `--mode refactor` or `optimize`, with no
+static checks (a whole interface or restructure lane edits its plans, tests and public names,
+which each step passed under its own plan); debt is reported but not gated. The tiers come from
+the base's config; a note check `tier_config` says when the head's `[gate]` table differs. Not
+with `--plan`, `--revert` or `--require-gain`; `meta.behaviour_only` is true and `log` refuses the JSON.
 
 ```bash
 codehealth log --gate-json g.json --campaign c1 --target src/a.py::f --recipe extract-function

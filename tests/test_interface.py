@@ -410,3 +410,43 @@ def test_declared_literals_validation(repo, capsys):
                 "literals_added[1]: reason must be a non-empty string",
                 "literals_removed[1]: literal must be a string", "literals_removed[1]: unknown key 'why'"):
         assert msg in err
+
+
+def merge_check(repo, *extra):
+    return main(["gate", "--repo", str(repo), "--log", str(repo.parent / "gate.log"), "--behaviour-only", *extra])
+
+
+def test_behaviour_only_merge_check_runs_tiers_without_static_checks(repo, capsys):
+    apply(repo)                                                # the whole lane: names removed, tests edited
+    assert main(["gate", "--repo", str(repo), "--log", str(repo.parent / "gate.log")]) == 1
+    capsys.readouterr()
+    gj = repo.parent / "mc.json"
+    assert merge_check(repo, "--json", str(gj)) == 0
+    out = capsys.readouterr().out
+    assert "ok   unit" in out and "ok   golden" in out and "(behaviour only)" in out
+    assert "public_api" not in out and "forbid" not in out and "not gated: --behaviour-only" in out
+    assert "tier_config" not in out
+    data = json.loads(gj.read_text())
+    assert data["meta"]["behaviour_only"] is True
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "lane tip")
+    assert main(["log", "--repo", str(repo), "--gate-json", str(gj), "--campaign", "c1",
+                 "--target", "pkg/mod.py", "--recipe", "lane", "--out", str(repo.parent / "r.jsonl")]) == 2
+    assert "behaviour-only" in capsys.readouterr().err
+
+
+def test_behaviour_only_still_fails_on_behaviour_and_notes_tier_config(repo, capsys):
+    (repo / "pkg/mod.py").write_text(BASE.replace("x * 3 + 1", "x * 3 + 2"))
+    cfg = (repo / ".codehealth/config.toml")
+    cfg.write_text(cfg.read_text().replace('name = "slow"', 'name = "slower"'))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "lane")
+    assert merge_check(repo, "--base", "HEAD~1") == 1
+    out = capsys.readouterr().out
+    assert "FAIL unit" in out and "ok   tier_config" in out
+
+
+def test_behaviour_only_refuses_plan_modes_and_gain(repo, capsys):
+    assert merge_check(repo, "--mode", "interface", "--plan", PLAN_PATH) == 2
+    assert merge_check(repo, "--require-gain") == 2
+    assert "merge-check" in capsys.readouterr().err

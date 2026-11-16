@@ -431,13 +431,15 @@ def cmd_gate(a) -> int:
     checks, base, ref_base = gatemod.gate(repo, a.base, a.cadence, log,
                                           Path(a.config).resolve() if a.config else None, a.mode,
                                           a.ref_base, require_gain=a.require_gain, info=info,
-                                          revert=revert, head_tree=head_tree, plan=a.plan)
+                                          revert=revert, head_tree=head_tree, plan=a.plan,
+                                          behaviour_only=a.behaviour_only)
     if revert:
         revert = [gitio.rev(repo, s) for s in revert if _resolves(repo, s)]
     write_json(a.json, {"meta": {"tool": "cce-code-health", "version": __version__, "base": base,
                                  "ref_base": ref_base, "head": head, "revert": revert, "cadence": a.cadence, "mode": a.mode,
                                  "log": str(log), **info, "require_gain": a.require_gain,
-                                 "trial": bool(a.config), "head_tree": head_tree},
+                                 "trial": bool(a.config), "behaviour_only": a.behaviour_only,
+                                 "head_tree": head_tree},
                         "checks": [c.__dict__ for c in checks]})
     for c in checks:
         detail = c.detail if len(c.detail) <= DETAIL_CHARS else (
@@ -446,7 +448,7 @@ def cmd_gate(a) -> int:
     failed = [c.name for c in checks if not c.ok]
     verdict = "FAIL" if failed else "TRIAL" if a.config else "PASS"
     print(f"GATE {verdict} {repo.name} base={base[:10]} ref-base={ref_base[:10]} "
-          f"head={head[:10]} mode={a.mode} cadence={a.cadence} "
+          f"head={head[:10]} mode={a.mode}{' (behaviour only)' if a.behaviour_only else ''} cadence={a.cadence} "
           f"debt={info['debt_before']}->{info['debt_after']}"
           + (f" revert={len(revert)}" if revert else "")
           + f": {len(checks) - len(failed)}/{len(checks)} checks passed"
@@ -484,6 +486,8 @@ def _check_log_args(a, data: dict) -> tuple[list, dict, str]:
         raise ValueError("--gate-json is a self-test or not a gate JSON; log needs `codehealth gate --json`")
     if meta_.get("trial"):
         raise ValueError("--gate-json is a trial gate (--config): not valid evidence, refusing")
+    if meta_.get("behaviour_only"):
+        raise ValueError("--gate-json is a --behaviour-only merge-check, not a step: refusing")
     for k in ("base", "ref_base", "mode", "head_tree", "debt_before", "debt_after"):
         if k not in meta_:
             raise ValueError(f"--gate-json meta lacks {k!r} (written by an older codehealth?)")
@@ -841,6 +845,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--revert", action="append", metavar="SHA",
                                      help="gate a commit that exactly undoes this earlier accepted step "
                                      "(repeatable); debt may rise; incompatible with --require-gain")
+    sub.choices["gate"].add_argument("--behaviour-only", action="store_true",
+                                     help="merge-check of a lane whose steps were each gated: tiers only, "
+                                     "no static checks, debt reported but not gated; not loggable")
     sub.choices["gate"].add_argument("--require-gain", action="store_true",
                                      help="add a static check `gain`: debt over touched files must drop")
     a = ap.parse_args(argv)

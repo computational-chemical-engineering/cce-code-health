@@ -1343,7 +1343,8 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
          config_override: Path | None = None, mode: str = "refactor",
          ref_base: str | None = None, require_gain: bool = False,
          info: dict | None = None, revert: list[str] | None = None,
-         head_tree: str | None = None, plan: str | None = None) -> tuple[list[Check], str, str]:
+         head_tree: str | None = None, plan: str | None = None,
+         behaviour_only: bool = False) -> tuple[list[Check], str, str]:
     """config_override is for local trials only; CI must use the base's committed config.
 
     mode "refactor": references bitwise, benchmark may not slow down beyond max_slowdown.
@@ -1359,6 +1360,10 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
     mode "restructure" (needs `plan`, a path under .codehealth/restructure/ read at base): as
     refactor, plus the `plan` check and the restructure public-API rule; `info["plan"]` receives
     {path, blob, id}.
+    With `behaviour_only` (merge-check of a whole lane whose steps were each gated): no static
+    checks; debt is reported but passes; the config checks and the tiers of `mode` (refactor or
+    optimize) run as usual, from the base's config. A note check `tier_config` says when the
+    head's [gate] table differs from the base's.
     """
     if mode not in ("refactor", "optimize", "restructure", "interface"):
         raise ValueError(f"unknown mode {mode!r}")
@@ -1366,6 +1371,9 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         raise ValueError("--mode restructure and --mode interface need --plan, and --plan is only for those modes")
     if plan and revert:
         raise ValueError("--plan and --revert are incompatible")
+    if behaviour_only and (plan or revert or require_gain or mode not in ("refactor", "optimize")):
+        raise ValueError("--behaviour-only is a merge-check: only with --mode refactor or optimize, "
+                         "without --plan, --revert or --require-gain")
     base = gitio.merge_base(repo, base_ref, "HEAD")
     ref_sha = gitio.merge_base(repo, ref_base, "HEAD") if ref_base else base
     cfg = (config.parse(config_override.read_text(), f"override:{config_override}")
@@ -1399,8 +1407,16 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         debt.ok = True
         debt.detail += " (rise allowed: exact revert)"
         extra = [revert_check(repo, base, revert, head_tree or gitio.worktree_tree(repo))]
-    static = static_checks(repo, base, cfg, changes, trial=config_override is not None, plan=plan_data,
-                           cadence=cadence)
+    if behaviour_only:
+        debt.ok = True
+        debt.detail += " (reported, not gated: --behaviour-only)"
+        static = []
+        if config_override is None and config.load(repo, "HEAD").gate != cfg.gate:
+            extra = [Check("tier_config", True, "note: the head's [gate] table differs from the base's; "
+                           "the tiers ran from the base's config")]
+    else:
+        static = static_checks(repo, base, cfg, changes, trial=config_override is not None, plan=plan_data,
+                               cadence=cadence)
     for c in static:
         if revert and c.name == "architecture" and not c.ok:
             c.ok = True
