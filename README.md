@@ -159,6 +159,15 @@ require `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` in `[gat
 optimize mode only the tier with `primary = true` must reach `min_speedup`; every other
 benchmark tier may not slow down beyond `max_slowdown` (default 0.03).
 
+String literals (`literals`, docstrings excluded) over the touched files: none may be new
+or occur more often at head. A literal whose count drops passes only when it still occurs and
+every scope that reached it at base and still exists reaches it at head: a function or method
+(by qualname, nested functions included), a class body or a module's top level reaches a
+literal it contains or that a function it references by name (called or passed) reaches. So
+merging two duplicated blocks into one helper passes, and deleting one copy of a duplicated
+check fails, naming the scope that lost it. Each allowed drop is listed in the check detail
+for review. Interface plans with `literals_added`/`literals_removed` stay exact.
+
 Empty gates fail: an empty diff at cadence step, optimize mode without a reference tier or
 a primary benchmark with `min_speedup`, refactor mode without a reference or command tier.
 `--ref-base <ref>` (default: same as `--base`) is the campaign base: reference and benchmark
@@ -379,7 +388,7 @@ new_public = ["src/pkg/solver/assembly.py:assemble"]
 
 Moves code into new modules under a human-approved plan, read from the base commit (absent:
 exit 2; the step itself cannot touch `.codehealth/`). Everything runs as in refactor mode (bitwise
-references, no slowdown, debt may not rise, string literals as one multiset over all touched
+references, no slowdown, debt may not rise, string literals over all touched
 files), plus: added files must match `new_files` (check `plan`); no public name may disappear from
 any module, and a definition may become a re-export `from <new module> import Name` only when the
 planned new file defines it with the identical API entry; new public names must be listed in

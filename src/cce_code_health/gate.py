@@ -8,7 +8,7 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     forbid = ["tests/*"]              # a step may not touch these; ".codehealth/*" is always forbidden
     keep_going = false                # true: run all tiers even after one fails (default: stop at the first)
     prefix = "PATH=.venv-codehealth/bin:$PATH"   # shell prefix prepended to every tier command
-    literals = true                   # string literals of touched files unchanged (multiset)
+    literals = true                   # string literals of touched files: none new or risen; a drop must stay reachable
     public_api = true                 # public names, decorators, signatures, constants, __all__,
                                       # re-exports and class fields unchanged
     [gate.env]                        # applied to every command (determinism pins)
@@ -99,8 +99,8 @@ same ratchet and `codehealth arch [--ref REF]` reports the current state.
 Restructure mode (`--mode restructure --plan .codehealth/restructure/<id>.toml`, see
 restructure.py): the plan is read from the base commit (absent or invalid: usage error, exit 2)
 with keys id, approved_by, reason, new_files (globs, each in scope) and new_public
-("path.py:Name"). As refactor mode (tiers, bitwise references, no slowdown, debt, literals as
-one multiset over all touched files, --require-gain), plus static check `plan` (every added file,
+("path.py:Name"). As refactor mode (tiers, bitwise references, no slowdown, debt, literals over
+all touched files (moves between files pass), --require-gain), plus static check `plan` (every added file,
 or new path of a rename, matches new_files) and, with public_api = true, a different public-API
 rule: no public name may disappear from any module (no removed or moved modules); a definition
 may become a re-export (`from <new> import Name`) only from an added planned file whose own API
@@ -245,6 +245,95 @@ def _string_literals(source: str) -> Counter:
     return Counter(repr(n.value) for n in ast.walk(tree)
                    if isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes))
                    and id(n) not in docstrings)
+
+
+def _docstring_ids(tree) -> set[int]:
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            b = node.body
+            if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant):
+                out.add(id(b[0].value))
+    return out
+
+
+def _literal_reach(sources: dict[str, str]) -> dict[str, set[str]]:
+    """scope -> the string literals it reaches, over the given Python sources.
+
+    A scope is a function or method (key: qualname; nested functions and lambdas belong to it),
+    a class body outside its methods (key: qualname), or a module's top-level statements outside
+    defs (key: path). A scope reaches a literal it contains, and every literal reached by a
+    function or method it references by name or attribute (called or not; matched by bare name
+    over all the sources), as a fixed point. Docstrings are not literals."""
+    lits: dict[str, set[str]] = {}
+    refs: dict[str, set[str]] = {}
+    defs: dict[str, set[str]] = {}
+
+    def add(key, nodes, docs):
+        ls, rs = lits.setdefault(key, set()), refs.setdefault(key, set())
+        for top in nodes:
+            for n in ast.walk(top):
+                if isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes)) and id(n) not in docs:
+                    ls.add(repr(n.value))
+                elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                    rs.add(n.id)
+                elif isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load):
+                    rs.add(n.attr)
+
+    def body(stmts, prefix, path, docs):
+        rest = []
+        for s in stmts:
+            if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                q = prefix + s.name
+                defs.setdefault(s.name, set()).add(q)
+                add(q, [s], docs)
+            elif isinstance(s, ast.ClassDef):
+                q = prefix + s.name
+                body(s.body, q + ".", path, docs)
+                add(q, [*s.bases, *s.keywords, *s.decorator_list], docs)
+            else:
+                rest.append(s)
+        add(prefix.rstrip(".") if prefix else path, rest, docs)
+
+    for path, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        body(tree.body, "", path, _docstring_ids(tree))
+    reach = {k: set(v) for k, v in lits.items()}
+    changed = True
+    while changed:
+        changed = False
+        for k in reach:
+            for name in refs[k]:
+                for d in defs.get(name, ()):
+                    if not reach[d] <= reach[k]:
+                        reach[k] |= reach[d]
+                        changed = True
+    return reach
+
+
+def literal_drops(gone: Counter, lh: Counter, tb: dict, th: dict) -> tuple[list[str], list[str]]:
+    """(problems, allowed) for string literals whose count dropped over the touched files. A drop
+    passes only if the literal still occurs at head and every scope that reached it at base and
+    still exists at head reaches it at head (a consolidation into a shared helper); deleting one
+    copy of a duplicated check fails."""
+    rb, rh = _literal_reach(tb), _literal_reach(th)
+    problems, allowed = [], []
+    for lit, n in sorted(gone.items()):
+        times = f" x{n}" if n > 1 else ""
+        if lit not in lh:
+            problems.append(f"removed {lit}{times}")
+            continue
+        lost = sorted(s for s, r in rb.items() if lit in r and s in rh and lit not in rh[s])
+        if lost:
+            problems.append(f"removed {lit}{times}: no longer reached from {', '.join(lost)}")
+        else:
+            users = sorted(s for s, r in rh.items() if lit in r)
+            allowed.append(f"dropped {lit}{times}, still reached from {', '.join(users[:6])}"
+                           + (f" +{len(users) - 6}" if len(users) > 6 else ""))
+    return problems, allowed
 
 
 def _decorators(node) -> str:
@@ -430,9 +519,10 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
             detail = "; ".join(problems if problems else ["as planned: " + "; ".join(interface.literal_record(plan))])
             checks.append(Check("literals", not problems, with_cpp(detail)))
         else:                                      # every difference, so one run shows the full set
-            detail = "; ".join([f"removed {k} x{n}" if n > 1 else f"removed {k}" for k, n in sorted(gone.items())]
-                               + [f"added {k} x{n}" if n > 1 else f"added {k}" for k, n in sorted(new.items())])
-            checks.append(Check("literals", not gone and not new, with_cpp(detail)))
+            problems, allowed = literal_drops(gone, lh, tb, th)
+            detail = "; ".join(problems + [f"added {k} x{n}" if n > 1 else f"added {k}" for k, n in sorted(new.items())]
+                               + allowed)
+            checks.append(Check("literals", not problems and not new, with_cpp(detail)))
     if iface:                                      # gate() refuses interface mode without public_api
         hp_ = sorted({interface._split(n)[0] for n in plan.get("retargeted", {}).values()})
         hb_, hh_ = gitio.read_files(repo, base, hp_), gitio.read_files(repo, None, hp_)
