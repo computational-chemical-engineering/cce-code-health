@@ -445,13 +445,17 @@ in refactor mode, except:
   f.py at head; a new public name in it still needs its own `added` entry); `removed` takes it away.
   A listed change the step did not make fails. The check's JSON entry carries `interface`:
   the old and new API text of each planned change, for review.
-  With `[gate] no_implicit_reexport = true` (needs `public_api = true`; sound only when a tier
-  runs a type checker with no-implicit-reexport, such as mypy --strict, over every importer),
-  the old module of a rename or retarget may keep a plain `from <new home> import N` that its
+  With `[gate] no_implicit_reexport = true` (needs `public_api = true`), the old module of a rename or retarget may keep a plain `from <new home> import N` that its
   own code reads: not a re-export under PEP 484. It still counts as a shim in an `__init__.py`,
   when `__all__` lists N or is anything but one literal assignment, when any import of N in
   the module (TYPE_CHECKING blocks too) has an alias or another source, when the module
-  star-imports from the home, or when nothing reads N.
+  star-imports from the home, or when nothing reads N. In exchange, `public_api` scans every
+  .py file in the working tree (tests, scripts and benchmarks included; the old module and the
+  step's caller files excepted) and fails, with file:line, on any that still takes N through the
+  old module: `from <old> import N [as x]` (relative imports resolved) or `<a>.N` with `a` bound
+  to the old module by `import <old> [as a]` or `from <pkg> import <leaf> [as a]`. String patch
+  targets (`setattr(mod, "N")`, `mock.patch("old.N")`) are not reads. So no importer can keep
+  using the old path unnoticed, with or without a type checker over it.
 - `literals`: with `literals_added` or `literals_removed` in the plan, the string-literal multiset
   of the touched files may differ from base by exactly the declared entries (no globs, one file
   each), and each entry must hold in its own file (that file's count of the literal moved by at

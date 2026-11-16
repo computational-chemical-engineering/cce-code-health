@@ -427,6 +427,71 @@ def bound_beyond_use(source: str, path: str, name: str, home: str, roots) -> boo
     return name in bound(source, skip=own_use)
 
 
+def moved_names(plan: dict) -> list[tuple[str, str]]:
+    """(old module path, name) of each name a `renamed` or `retargeted` entry moves away."""
+    out = []
+    for o, n in [*plan.get("renamed", {}).items(), *plan.get("retargeted", {}).items()]:
+        if ":" in o:
+            po, no = _split(o)
+            out.append((po, no.split(".")[0]))
+    return out
+
+
+def old_path_importers(plan: dict, files: dict[str, str], roots, exempt: set[str]) -> list[str]:
+    """`path:line: ...` for each file that still takes a moved name N through its old module:
+    `from <old> import N [as x]` (relative imports resolved), or `<a>.N` where `a` is bound to the
+    old module by `import <old> [as a]` or `from <pkg> import <leaf> [as a]`. String patch targets
+    (`setattr(mod, "N")`, `mock.patch("old.N")`) are not reads. With `[gate] no_implicit_reexport`
+    this stands in for a type checker over files it does not cover (tests, scripts)."""
+    from .architecture import module_name  # noqa: PLC0415
+    moved: dict[str, set[str]] = {}
+    for po, n in moved_names(plan):
+        m = module_name(po, roots)
+        if m:
+            moved.setdefault(m[0], set()).add(n)
+    if not moved:
+        return []
+    out = []
+    leaves = {m.rsplit(".", 1)[-1] for m in moved}
+    for path, text in sorted(files.items()):
+        if path in exempt or not any(n in text for ns in moved.values() for n in ns) \
+                or not any(leaf in text for leaf in leaves):
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        alias: dict[str, str] = {}                       # local name -> dotted module it is bound to
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                src = _import_module(node, path, roots)
+                for a in node.names:
+                    if src in moved and a.name in moved[src]:
+                        out.append(f"{path}:{node.lineno}: takes {a.name} through its old module {src}")
+                    full = f"{src}.{a.name}" if src else a.name
+                    if full in moved:
+                        alias[a.asname or a.name] = full
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.asname:
+                        alias[a.asname] = a.name
+                    else:
+                        alias.setdefault(a.name.split(".")[0], a.name.split(".")[0])
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                chain, cur = [node.attr], node.value
+                while isinstance(cur, ast.Attribute):
+                    chain.append(cur.attr)
+                    cur = cur.value
+                if not isinstance(cur, ast.Name) or cur.id not in alias:
+                    continue
+                dotted = ".".join([alias[cur.id], *reversed(chain)])
+                mod, _, n = dotted.rpartition(".")
+                if mod in moved and n in moved[mod]:
+                    out.append(f"{path}:{node.lineno}: takes {n} through its old module {mod}")
+    return sorted(set(out), key=lambda s: (s.split(":")[0], int(s.split(":")[1])))
+
+
 # -- the exact public-API rule -----------------------------------------------------------------
 
 def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,

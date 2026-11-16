@@ -536,7 +536,15 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         problems, record = interface.public_api_problems(
             plan, py, tb, th, _public_api, homes, (cfg.architecture or {}).get("roots", ["src", "."]),
             own_use_imports=g.get("no_implicit_reexport", False))
-        c = Check("public_api", not problems, with_cpp("; ".join(problems[:5])))
+        if g.get("no_implicit_reexport", False) and interface.moved_names(plan):
+            roots_ = (cfg.architecture or {}).get("roots", ["src", "."])
+            exempt = {po for po, _ in interface.moved_names(plan)}
+            exempt |= {hp for _, _, hp in interface.caller_paths(plan, changes, cfg, list(g.get("forbid", []))) if hp}
+            pys = [p for p in gitio.ls_files(repo, None) if p.endswith(".py") and p not in exempt]
+            problems += interface.old_path_importers(plan, gitio.read_files(repo, None, pys),
+                                                     [*roots_, "."], exempt)
+        c = Check("public_api", not problems, with_cpp("; ".join(problems[:5])
+                                                       + (f"; +{len(problems) - 5} more" if len(problems) > 5 else "")))
         c.interface = record                       # old and new API text per planned change
         checks.append(c)
     elif g.get("public_api", False) and plan is not None:

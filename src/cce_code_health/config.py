@@ -169,8 +169,8 @@ def check(text: str) -> tuple[list[str], list[str]]:
         bad.append("[gate] no_implicit_reexport needs public_api = true")
     elif gate.get("no_implicit_reexport"):
         info.append("[gate] no_implicit_reexport: an old module may keep a plain import of a moved name "
-                    "for its own code; only sound when a tier runs a type checker with "
-                    "no-implicit-reexport (mypy --strict) over every importer")
+                    "for its own code; public_api then fails on any .py file that still takes the name "
+                    "through the old module")
     tiers = gate.get("tier", [])
     names = [t.get("name") for t in tiers]
     bad += [f"duplicate tier name {n!r}" for n in sorted({n for n in names if names.count(n) > 1})]

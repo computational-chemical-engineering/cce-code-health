@@ -564,3 +564,56 @@ def test_callers_code_string_other_changes_fail(old, new):
 def test_worktree_crlf_reads_as_lf():
     assert decode(b"a\r\nb\rc\n", newlines=True) == "a\nb\nc\n"
     assert decode(b"a\r\nb\n") == "a\r\nb\n"
+
+
+from cce_code_health.interface import old_path_importers  # noqa: E402
+
+MOVE = {"renamed": {"src/app/types.py:ApiError": "src/app/errors.py:ApiError"}}
+
+
+@pytest.mark.parametrize("text,hit", [
+    ("from app.types import ApiError\n", True),
+    ("from app.types import ApiError as E\n", True),
+    ("from app import types\nx = types.ApiError\n", True),
+    ("from app import types as T\nx = T.ApiError\n", True),
+    ("import app.types\nx = app.types.ApiError\n", True),
+    ("import app.types as T\n\n\ndef f():\n    raise T.ApiError()\n", True),
+    ("from app.errors import ApiError\n", False),
+    ("from app import types\nx = types.other\n", False),
+    ("from app import types\n\n\ndef test(mp):\n    mp.setattr(types, 'ApiError', 1)\n", False),   # patch target
+    ("from unittest import mock\n\n\ndef test():\n    mock.patch('app.types.ApiError')\n", False),
+])
+def test_old_path_importers(text, hit):
+    probs = old_path_importers(MOVE, {"tests/t.py": text}, ["src", "."], set())
+    assert bool(probs) == hit, probs
+    if hit:
+        assert probs[0].startswith("tests/t.py:") and "takes ApiError through its old module app.types" in probs[0]
+
+
+def test_old_path_importers_relative_and_exempt():
+    rel = {"src/app/other.py": "from .types import ApiError\n"}
+    assert old_path_importers(MOVE, rel, ["src", "."], set())
+    assert old_path_importers(MOVE, rel, ["src", "."], {"src/app/other.py"}) == []
+
+
+def test_gate_no_implicit_reexport_scans_untouched_importers(tmp_path, capsys):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    cfg = CONFIG.replace("public_api = true", "public_api = true\nno_implicit_reexport = true")
+    plan = ('id = "mv"\napproved_by = "reviewer"\nreason = "move E"\n'
+            'renamed = {"pkg/a.py:E" = "pkg/b.py:E"}\nnew_files = ["pkg/b.py"]\n')
+    git(repo, "init", "-q", "-b", "main")
+    commit(repo, {".gitignore": "__pycache__/\n", ".codehealth/config.toml": cfg, ".codehealth/interface/mv.toml": plan,
+                  "pkg/__init__.py": "", "pkg/mod.py": MOD, "frozen/ident.py": "X = 1\n",
+                  "pkg/a.py": "class E(Exception):\n    pass\n\n\ndef f():\n    raise E()\n",
+                  "tests/test_y.py": "from pkg.a import E\n\n\ndef test():\n    assert E\n"})
+    (repo / "pkg/b.py").write_text("class E(Exception):\n    pass\n")
+    (repo / "pkg/a.py").write_text("from pkg.b import E\n\n\ndef f():\n    raise E()\n")
+    args = ["gate", "--repo", str(repo), "--log", str(tmp_path / "g.log"), "--mode", "interface",
+            "--plan", ".codehealth/interface/mv.toml"]
+    assert main(args) == 1
+    assert "tests/test_y.py:1: takes E through its old module pkg.a" in capsys.readouterr().out
+    commit(repo, {"tests/test_y.py": "from pkg.b import E\n\n\ndef test():\n    assert E\n"})   # migrated earlier
+    (repo / "pkg/b.py").write_text("class E(Exception):\n    pass\n")
+    (repo / "pkg/a.py").write_text("from pkg.b import E\n\n\ndef f():\n    raise E()\n")
+    assert main(args) == 0, capsys.readouterr().out
