@@ -17,10 +17,10 @@ open-source proxy, not CodeScene's Code Health metric.
 
 See [docs/DESIGN.md](docs/DESIGN.md). License: MIT.
 
-## Usage (0.1)
+## Usage (0.2)
 
 ```bash
-pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.1.0
+pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.2.0
 codehealth scan                      # score in-scope files in the working tree
 codehealth diff --base origin/main   # ratchet: fail (exit 1) if the change adds debt
 codehealth hotspots --top 20         # rank files by commits x debt (follows renames)

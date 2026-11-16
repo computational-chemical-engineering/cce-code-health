@@ -53,6 +53,7 @@ Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = H
 - OFS S19 B1 bug (2026-11-14, fixed): split of region.py huge -> large failed as "new file smell large_file"; size smells are now one ordered family (report.added_smells, used by gate, diff and hook). 334 tests.
 - dem LANDED 2026-11-15: peclet-dem#13 merged -> dem main 2ed8411; debt 1871.8 -> 1475.6 (-21 %), brain 12 -> 7 (docs/adopters/peclet.md). Its S8 findings done: `log --external-fail NAME` (gate-fail of an external check), gate_json logged repo-relative, `docs` without [docs] prints DOCS OFF and exits 0 (`--agent` uses defaults). 336 tests. v0.2.0 tag now waits only for OFS W4.
 - OFS S19 W4 step 197 defect (2026-11-16, fixed): duplication counted the name lists of `from x import (...)` (column.py dup_lines 32 -> 41 crossed 10 % on an import-only retarget). Clone detection now leaves out whole import statements (paren lists, backslash continuations), as CPD ignore-imports; step 197 now 32 -> 32. 340 tests.
+- v0.2.0 TAGGED 2026-11-16 (user form decision: after dem S5 + OFS W4; OFS W4 merged into wp/S19 as 7ffa7901). Plugin 0.2.0, README install @v0.2.0. Open request from OFS: a behaviour-only merge-check mode for gate (interface lanes fail static checks by construction).
 - Open C++ issues in docs/adopters/peclet.md.
 Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
 
