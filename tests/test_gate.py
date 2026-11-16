@@ -289,3 +289,17 @@ def test_literals_detail_lists_every_difference(repo, capsys):
     assert gate(repo, "--json", str(gj)) == 1
     lit = next(c for c in json.loads(gj.read_text())["checks"] if c["name"] == "literals")
     assert all(f"added 'lit{i}'" in lit["detail"] for i in range(8)) and "added 'x' x8" in lit["detail"]
+
+
+def test_files_glob_placeholder_keeps_matching_paths(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    lint = tmp_path / "lint.txt"
+    cfg = CONFIG + f'[[gate.tier]]\nname = "lint"\ncmd = "echo [{{files:*.py}}] [{{files:*.json,*.md}}] > {lint}"\n'
+    git(repo, "init", "-q", "-b", "main")
+    commit(repo, {".codehealth/config.toml": cfg, "pkg/__init__.py": "", "pkg/mod.py": MOD,
+                  "pkg/data.json": "{}\n", "frozen/ident.py": "X = 1\n"})
+    edit(repo, "pkg/mod.py", MOD.replace("Docstrings may change.", "Changed doc."))
+    edit(repo, "pkg/data.json", '{"a": 1}\n')     # out of scope: a merge-check (no static checks) sees it
+    assert gate(repo, "--behaviour-only") == 0
+    assert lint.read_text().split() == ["[pkg/mod.py]", "[pkg/data.json]"]

@@ -38,7 +38,9 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     min_speedup = 1.2
     max_slowdown = 0.03               # every other benchmark tier: may not slow down beyond this
 
-Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted).
+Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted, any
+type: docs and data too) and {files:GLOB[,GLOB]} (only those matching, e.g. {files:*.py} for a linter;
+empty when none match, so guard the command, e.g. `set -- {files:*.py}; [ $# -eq 0 ] || ruff check "$@"`).
 {ref_base} is the campaign base sha (`--ref-base`; equal to {base} when not given). In the
 self-test `--ref-base` (merge-base with HEAD) is honoured for the {ref_base} placeholder only, so an
 impacted-test selector sees the campaign base; reference comparison stays against the unmutated HEAD.
@@ -658,6 +660,10 @@ def _kill_group(proc: subprocess.Popen) -> None:
 
 
 def _fill(cmd: str, **kw) -> str:
+    if "files" in kw:                       # {files:*.py,*.pyi}: the touched head paths matching a glob
+        cmd = re.sub(r"\{files:([^}]+)\}", lambda m: " ".join(
+            shlex.quote(f) for f in shlex.split(kw["files"])
+            if any(config.match(f, g.strip()) for g in m.group(1).split(","))), cmd)
     for k, v in kw.items():
         cmd = cmd.replace("{" + k + "}", v)
     return cmd

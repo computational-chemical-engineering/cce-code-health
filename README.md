@@ -187,6 +187,9 @@ must pass on the unmutated HEAD first ("tier X fails without mutation").
 may set `detect_exit = [1, 5]` so that any other nonzero exit counts as an error, not a detection.
 
 Tier commands also get `{ref_base}` (the campaign base sha; equal to `{base}` without `--ref-base`).
+`{files}` is every touched head path, docs and data included (a `--behaviour-only` merge-check
+sees the whole lane); `{files:*.py}` (comma-separated globs) keeps the matching ones, for a
+linter. It can be empty: `set -- {files:*.py}; [ $# -eq 0 ] || ruff check "$@"`.
 The self-test honours `--ref-base` for this placeholder only (without it `{ref_base}` is HEAD);
 reference comparison there stays against the unmutated HEAD, and the self-test JSON `meta.ref_base`
 records the value (null when not given).
