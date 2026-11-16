@@ -34,3 +34,12 @@ def test_all_declarations_are_left_out():
     b = f"__all__ = [\n{names}\n]\n__all__ += ['x']\n__all__: list[str] = ('y',\n    'z')\n\ndef f():\n    return 1\n"
     assert duplicated_lines({"a.py": a, "b.py": b}, 8) == {}
     assert code_lines(b) == ["def f():", "return 1"]
+
+
+def test_python_docstrings_are_left_out():
+    doc = "\n".join(f"    p{i} : float\n        The {i}th parameter." for i in range(6))
+    a = f'def f(x):\n    """F.\n\n    Parameters\n    ----------\n{doc}\n    """\n    return x\n'
+    b = f'def g(y):\n    """G.\n\n    Parameters\n    ----------\n{doc}\n    """\n    return -y\n'
+    assert duplicated_lines({"a.py": a, "b.py": b}, 8) == {}
+    assert code_lines(a, python=True) == ["def f(x):", "return x"]
+    assert duplicated_lines({"a.txt": a, "b.txt": b}, 8) != {}        # not Python: lines count
