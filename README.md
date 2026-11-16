@@ -43,7 +43,8 @@ brain}; `groups` (with `--group-depth`) an object keyed by prefix with the `tota
 for cognitive complexity, lines of code, nesting, bumpy road, parameters and boolean
 operators per condition (profile `python@0`, see `src/cce_code_health/profiles.py`). Cognitive
 complexity comes from complexipy, pinned at 8.3.0 for `python@0` (complexipy 9 scores differently);
-scan, diff and gate JSONs record the backend versions under `meta.backends`.
+lizard is pinned at 1.26.0 for `cpp@0`; scan, diff and gate JSONs record the backend versions
+under `meta.backends`.
 The 1..10 **health** value is for display only. It measures something different: per file, 10
 minus a penalty per smelly function (brain 1.0, complex and deep nesting 0.5, bumpy road 0.5,
 long 0.3, many parameters 0.2, each capped per file) and per file smell, averaged over files
