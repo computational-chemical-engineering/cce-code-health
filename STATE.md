@@ -1,78 +1,46 @@
 # cce-code-health: state
 
-Objective: build an agentic refactor loop (agent + skills + measurement tools) that raises
-code health of a Python repo to ~10 without changing behaviour, building its own playbook;
-importable into any repo. Public repo-to-be: computational-chemical-engineering/cce-code-health (MIT, 0.x experimental). Design: docs/DESIGN.md; decisions: docs/DECISIONS.md. Demo target: OpenFlowsheet, judged before/after by CodeScene
-(free Community Edition, public repo), loop itself optimises open-source metrics.
+Rewritten in place, about one screen. History: docs/STATE_LOG.md (append-only, grep it).
+Design: docs/DESIGN.md. Decisions: docs/DECISIONS.md. Adopters: docs/adopters/*.md.
 
-Position (2026-11-11):
-- Public repo https://github.com/computational-chemical-engineering/cce-code-health (main).
-- Package v0.1.0 (src/cce_code_health): CLI `codehealth scan|diff|hotspots`, debt metric
-  profile python@0, base-vs-head ratchet with base config, rename-following hotspots,
-  inline suppressions. 13 tests (tests/). docs/DESIGN.md is draft 1 (after think review).
-- baseline.py = superseded prototype (capped score); baselines/openflowsheet-a9e733e4 kept.
-- OpenFlowsheet@a9e733e4 scan: 1191 files, 422.5k NLOC, debt 26594 (62.9/kNLOC), health
-  7.17, brain 158; src debt 6950, health 7.04. diff HEAD~50..HEAD: debt over touched
-  files 1418.5 -> 2014.8, 6 failures. Scan 17 s, diff 5.5 s.
+Objective: an agentic refactor loop (`codehealth` CLI + Claude Code plugin with the
+refactor-loop, optimize-loop and healthy-coding skills) that raises code health without
+changing behaviour and builds its own playbook; importable into any repo.
+Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
-OpenFlowsheet adopter findings: docs/adopters/openflowsheet.md (F0 identity gate 40 s,
-35 frozen modules, tiered gate proposal). Calibration: docs/CALIBRATION.md (rho 0.87, src 0.90).
-Coverage/xdist in OpenFlowsheet: user wants it; OpenFlowsheet-TR09 plan received approved as wp/S16, starts after budget reset 2026-11-12 13:00; see adopter notes. Hub informed of this project. First scope confirmed: application/ (campaign after S16 merge).
+## Position (2026-11-16)
 
-codehealth gate built (static rules, command and reference tiers, cadence, trial --config); OpenFlowsheet trial: F0 misses an application/ behaviour change, so impacted tests (S16) are required.
-Gate hardened after think review 2026-11-12 (55 tests; see DECISIONS). Skill optimize-loop updated (self-test precondition, interim noise rule).
-Decisions 11-14 taken 2026-11-12; 11-13 implemented (--ref-base with cached base outputs, head twice; speedup lower confidence bound with extended rounds; numeric-literals report; coverage = true per reference tier). Adopter fixes from OpenFlowsheet (self-test baseline, config --check, prefix, glob). 69 tests. 14 when Peclet is onboarded.
-Skill refactor-loop + seed recipes written 2026-11-12; self-test counts behaviour command tiers when no reference tier (lint tiers: behaviour = false). 56 tests.
-OpenFlowsheet: S16 running since ~12:00 (wp/S16, opus-engineer, incl. run/select --lines/recall). Campaign = S17 (wp/S17): first work order installs codehealth (.venv-codehealth from requirements-codehealth.txt pinned to a full SHA), .codehealth/config.toml (my draft + frozen: application/bindings/descriptions/*, schemas/*, messages/catalogue/*, benchmarks/f0/*; MCP digest tier = pytest tests/test_t08_w2_surface_digest.py tests/test_m07a_surface_chain.py), informational CI diff job; starts when S16 merged. S18 = scale probe. Identity-epoch question answered after campaign 1.
-Versioning: setuptools-scm since cec6dbeb (each commit a distinct pip version). OpenFlowsheet S17 pinned at 7628e737 (wp/S17 b63c9c73, their D10; five tier timeouts, config --check OK); campaign 1 starts when S16 recall is clean.
-Tier processes run in their own process group; timeout or interrupt kills the whole group, stragglers of finished tiers are killed too (reported by OpenFlowsheet-TR09 2026-11-12, xdist worker survived a hung test). Skills require a timeout per behaviour tier. 72 tests.
-Adopter feedback round 2 (OpenFlowsheet-TR09, 2026-11-13): {ref_base} placeholder, exit codes and self-test outcome (detected|missed|error) in JSON, per-tier detect_exit, debt_before/after + head_tree in gate JSON, --require-gain (exit 0 = accept), `codehealth log` (validated run-log lines, HEAD tree must equal gated tree), scan end_line/qualname, --mutate path:line:N. Skills: create all campaign files before the campaign base. 88 tests.
-Round 3 (2026-11-13): self-test honours --ref-base for {ref_base}; meta.head = HEAD sha when the tree is clean; gate --revert SHA (exact inverse via merge-tree, debt may rise; log records class revert, result review-reject). Skills: commit provisionally, then gate, reset --hard on failure; seed recipe check-ladder and review anti-patterns. 97 tests.
-2026-11-13 user items 1, 2, 4 (beyond the procedure): built, think-reviewed (12 findings fixed), pushed at 092aaeea (215 tests):
-- prevention: `codehealth hook` + plugin PostToolUse hook (post_edit.sh), healthy-coding skill, reusable CI workflow .github/workflows/codehealth-diff.yml;
-- architecture: `codehealth coupling` (test pairs dropped), LCOM4 informational, `[architecture]` layers/forbid/cycles ratchet (`codehealth arch`, diff, gate), change class restructure (plan at base);
-- Peclet prep: cpp@0 (lizard) + `[profiles] cpp`; docs/adopters/peclet.md; counterpart session peclet_health on SMM-TRS2 (/home/frankp/Codes/suite): first target dem; it runs all builds; send it the install command after push.
-- C++ gate: skip_exit/fail_regex, findings tier (clang-tidy/warnings ratchet), flags static check (decision 14), convergence tier; scan/hotspots --config for read-only trials.
-- dem scan done by peclet_health (debt 1939, 12 brain). Fixes: 4a092f16 cpp@0 binding tables (NB_MODULE etc.) carry no length debt and are never brain; 8a10c858 `coupling --config`. Agreed order: demSolveContacts phases, launcher parameter structs, colouring dedup; *Kokkos renames before CB.
-- OpenFlowsheet S17 pinned at 8a10c858 (scan at CB bit-identical), WO-2 binding.py 134.2 -> 43.6, application/ 855.0 -> 683.5. Its feedback: `log --result accepted-neutral --reason` (no-gain step gated without --require-gain) and `log --head SHA` (late logging), 222 tests.
-- Docs health (user 2026-11-13): recon of OpenFlowsheet and Peclet (both run their examples; neither checks agent docs or docstrings); design docs/DOCS_HEALTH.md (think-reviewed); built `[docs]` table, `codehealth docs --stats`, docs ratchet in diff/gate (check `docs`), docstrings D1/D2 in diff/gate/hook (check `docstrings`). OpenFlowsheet trial: 763 docs, 26k refs, 2.9 s; replay 60 commits: 0 rot failures, new unresolved refs warn by default; after the implementation review (15 findings fixed) replay 0 failures in 60 commits. Self-test mutates C++ literals (--mutate path:line[:N]). dem config draft sent to peclet_health (docs/adopters/dem-config-draft.toml). 259 tests. Later 2026-11-13: reference tier `same_lines` (dependency resolution identical at base and head; peclet_health bug A: base worktree fetched core v1.3.0), restructure _binders fix for kw-only params without default (OpenFlowsheet blocker). Later: staleness via co-change, docs-sync review lane, agent-doc size budget, exemplars, C++ D1/D2.
-- Peclet dem S1 closed (peclet_health 2026-11-13): CB 3fd9b93, 3 extract-phase steps on demSolveContacts, all GATE PASS 13/13 bitwise, logged accepted; function 345 -> 258.3, dem 1871.8 -> 1858.2. Its feedback, done: log `target_debt` (function before/after + new functions in the file, from gate meta `function_debt`); seed anti-pattern "phase helper with 10+ parameters" (parameter-object first); README notes that cpp@0 does not count `[&]` captures. 260 tests. dem S2 next: launch-params struct.
-- dem S2-S4 closed (2026-11-13/14): debt 1858.2 -> 1693.5, brain back to 12 after S3's relocation (exit rule now in the refactor-loop skill); log `target_debt.relocated`; README health vs debt; GPU path not deterministic (envelope check, no device reference tier). S5 (dedup colouring) running.
-- OpenFlowsheet S17 merged d90b498f (2026-11-14): debt 855.0 -> 301.8, health 7.22 -> 8.49, brain 6 -> 0, arch 11 violations/83 cycle edges -> 2/6. Its restructure rules and extract-phase when-nots folded into the seed; `log --reason` allowed on gate-fail. 262 tests.
-- OpenFlowsheet S19 (repo-wide) requests, done 2026-11-14: `arch --config/--depth/--edges` (roots-only table reports cycles and group edge counts; trial on d90b498f matches their script: 10 cycles, largest 17 modules/51 edges, 2.6 s), `scan --group-depth`, scan JSON schema documented (`meta.schema` 1), run log shared across worktrees under flock with `branch` field. 266 tests.
-- Gate `--mode interface --plan .codehealth/interface/<id>.toml` (OpenFlowsheet S19 W4, ADR 0076): exact public-API rule over every binding (removed, renamed, changed, added), caller files may only follow the plan (check `callers`), needs public_api = true; think review found 4 bugs + 5 gaps, all fixed with regression tests; the callers rule itself is unreviewed. 290 tests. Later: restructure-mode warning for tests that patch a moved name through its old module (seed rule added now).
-- User decisions 2026-11-14 (DECISIONS.md last row): dem to main after S5 as PR; second think review of interface callers rule (running); tag v0.2.0 after dem S5 + OFS W4; OFS [docs] warn-only before W4 (sent); next tool work in order: playbook stats, docs co-change staleness, agent-doc size budget; CodeScene later; no next Peclet repo yet.
-- `codehealth stats` (playbook statistics, user priority 1 of 3) built 2026-11-14; on OpenFlowsheet S17 it reproduces their totals (extract-phase 59 accepted, 5 gate-fails, 1 review-reject). Docs staleness (`docs --stale`, diff co-change review rows) built 2026-11-14 (priority 2). Agent-doc budget (`docs --agent`, diff ratchet, warn default) built 2026-11-14 (priority 3). All three user-picked items done.
-- dem close findings (peclet_health 2026-11-14), fixed: step gate fails a new file smell (large_file etc.) and notes new brain functions; campaign cadence excuses paths touched only by docs/config commits (playbook, run-log copy). Interface callers rule rewritten after the second think review (8 weakenings, 4 false rejects): names resolved through each file's imports; `retargeted` (OFS Q-F1) and patch-following (Q-F5) added.
-- dem S7 finding (peclet_health 2026-11-14, fixed): a verbatim split could never be accepted (function debt unchanged). Restructure mode now counts a drop in size-smell weight (huge 2, large 1) with debt not rising as a gain (gate `gain`, meta `size_smells`, log accepted); a new duplication smell from duplicates concentrated by a split is a note when duplicated lines over the touched files did not rise (gate and diff). Frank approved the dem-multilevel-split plan (ca50b3e), one more round S7, then a PR with full CI that peclet_health merges. 326 tests.
-- dem S7 finding 2 (2026-11-14, fixed): findings tier ratcheted per (file, check), so code moved between files failed (dem: braces 40 -> 50 in contact_preprocessing.hpp while src/ total fell 791 -> 782). Now per check summed over the touched files, per (file, check) for untouched files. A fix in one touched file can offset a new finding of the same check in another (net ratchet, like debt). 327 tests.
-- OpenFlowsheet S19 request (2026-11-14, done): `log --rerun-of STEP --reason` records a re-gated tree whose earlier records are all gate-fails (flaky wall-time tier, A6 part 1); record carries rerun_of + prior_gate_json; stats counts superseded gate-fails as reruns. 328 tests.
-- dem campaign gate PASS on 93a36d8 (peclet_health 2026-11-14): head 4055ffc vs CB 3fd9b93, 13/13, debt over touched 1465.6 -> 1229.2, clang_tidy base 2512 -> head 1552 (5 per-file rises offset by moved code). Frank (Decision Desk): S8 = solveVelocityColoredGS + hertzWallForces with the S7 recipe, then the PR; pnm held until junction-law lands. v0.2.0 tag waits for dem S5 (done) + OFS W4.
-- OpenFlowsheet S19 I-15 request (2026-11-14, done): interface plan keys `literals_added`/`literals_removed` ({file, literal, count, reason}); literals check passes only on exactly the declared multiset difference, each entry true in its own file; meta plan carries them. 331 tests.
-- OFS I-15 passed on 8b40f31 (17/17, 8 declared literals). Follow-up done: `literals` detail lists every difference (no cap); console truncates any check detail at 600 chars, the gate JSON keeps it whole.
-- OFS S19 B1 bug (2026-11-14, fixed): split of region.py huge -> large failed as "new file smell large_file"; size smells are now one ordered family (report.added_smells, used by gate, diff and hook). 334 tests.
-- dem LANDED 2026-11-15: peclet-dem#13 merged -> dem main 2ed8411; debt 1871.8 -> 1475.6 (-21 %), brain 12 -> 7 (docs/adopters/peclet.md). Its S8 findings done: `log --external-fail NAME` (gate-fail of an external check), gate_json logged repo-relative, `docs` without [docs] prints DOCS OFF and exits 0 (`--agent` uses defaults). 336 tests. v0.2.0 tag now waits only for OFS W4.
-- OFS S19 W4 step 197 defect (2026-11-16, fixed): duplication counted the name lists of `from x import (...)` (column.py dup_lines 32 -> 41 crossed 10 % on an import-only retarget). Clone detection now leaves out whole import statements (paren lists, backslash continuations), as CPD ignore-imports; step 197 now 32 -> 32. 340 tests.
-- v0.2.0 TAGGED 2026-11-16 (user form decision: after dem S5 + OFS W4; OFS W4 merged into wp/S19 as 7ffa7901). Plugin 0.2.0, README install @v0.2.0. Open request from OFS: a behaviour-only merge-check mode for gate (interface lanes fail static checks by construction).
-- OFS S19 request (2026-11-16, done): `gate --behaviour-only` merge-check (tiers only over base..head, no static checks, debt reported not gated, base config, note `tier_config` if head [gate] differs, log refuses). Retires S19's merge_tiers.sh. 343 tests.
-- peclet_health status (2026-11-16): dem S9 landed (PR #14, dem 9c36779); flow F1+F2 landed (PRs #15, #16, flow ed61f38), F3 in CI (PR #17) on 719092b; flow debt 5799.4 -> 5558.9, brain 48 -> 42, bitwise incl. GPU. Re-pins @v0.2.0 next round.
-- OFS S19 W4 run 7 request (2026-11-16, done): interface plans accept `added = ["f.py:__all__"]` (existing module gains __all__; literal list, every name bound at head) and `removed = ["f.py:__all__"]`. 345 tests.
-- pymrm adopter (2026-11-16): session pymrm-health (uds 2763865, ~/Code/pymrm_suite/pymrm) starts a health campaign with the public interface frozen. Onboarded (commands, metrics, config sketch with public_api = true). My read-only default-scope scan: 65 files, debt 1425.8, health 8.03, brain 8; src/pymrm 15 files, debt 1282.8 (solve.py 545.0). No baseline existed before.
-- pymrm-health findings (2026-11-16, fixed): (a) complexipy 9.0.0 (fresh installs, CI) scores cognitive complexity differently from 8.3.0 (my venv, OFS .venv-codehealth): pymrm src debt 1109.8 vs 1282.8, coupling.py 43.9 vs 91.9. Pinned complexipy==8.3.0 for python@0; meta.backends records complexipy/lizard versions. lizard (cpp@0) not pinned yet: ask peclet_health its version. (b) `__all__` declarations left out of clone detection (pymrm __init__.py mirrored segmentation.py's __all__; dup 11.3 % -> 0). 346 tests.
-- lizard pinned ==1.26.0 for cpp@0 (2026-11-16): peclet_health's TRS2 venv (~/.venvs/codehealth) has lizard 1.26.0, which scored every dem/flow number; its complexipy 9.0.0 scored nothing (no Python in scope).
-- OFS finding (2026-11-16, done): a ruff tier got .md/.json paths from {files} in the first --behaviour-only merge-check (job 173 PASS after OFS filtered). New placeholder {files:GLOB[,GLOB]}. pymrm-health re-baselined at 8.3.0: src debt 1282.8, health 5.82, brain 8 (72.6 % of debt; newton 443.2); interface-locked 76.0 (5.9 %). Campaign waits for the user's go. 347 tests.
-- pymrm-health c1 started (CB fdbc077, tool 6ab9fd1). Q1 (2026-11-16, done): Python docstrings left out of clone detection (pymrm convect 14.0 -> 9.7 %, smell gone; operators 15.9 -> 12.8 %). Q2 (string-literal count drop in consolidation) with think; open.
-- pymrm Q2 (2026-11-16, done; think on Opus xhigh advised rule E): string-literal count may drop only if still present and every scope reaching it at base (and existing at head) reaches it at head (fixed point over name/attribute refs, bare-name match). Consolidation passes, deleting one copy of a duplicated check fails. gate.literal_drops/_literal_reach; tests/test_literal_reach.py. Known flake seen once: test_interface::test_exact_plan_passes_and_logs_interface (HEAD tree differs from gated tree) in a full run; 3 reruns clean.
-- pymrm-health request (2026-11-16, done): benchmark tier `metric = "wall"|"cpu"|"both"` (TR09 at load 25-59 gave 3 false wall-time rejections with equal children CPU). both: guard fails only if both slow, speedup claim needs both. 362 tests.
-- OFS W4 I-5b/I-9 request (2026-11-16, done; think review on Opus xhigh found 5 defects, all fixed): opt-in `[gate] no_implicit_reexport` lets an old module keep a plain own-use import of a moved name (strict: no alias anywhere, plain __all__ not listing it, not __init__, no star import from home, name read; module names via architecture roots); binary caller = not strict UTF-8 or NUL; worktree CRLF -> LF; code strings with imports normalised (imports kept as tokens, line count + comments compared). OFS I-5b and I-9 pass static checks with the flag, fail without. 379 tests.
-- pymrm c1 (2026-11-16): metric "both" per step (tool 9095836). Lane B done (33 accepted steps); projected merge of lanes A+B: debt 1282.8 -> 547.1, health 5.82 -> 7.30, brain 8 -> 4, file smells 3 -> 0.
-- OFS follow-up (2026-11-16, done): under no_implicit_reexport, public_api scans every worktree .py (old module and touched callers exempt) for `from <old> import N` / `<alias-of-old>.N`; string patch targets exempt (interface.old_path_importers). Makes the flag sound without mypy over tests. OFS I-9: 1240 files, ~1 s, 0 hits. 391 tests.
-- Open C++ issues in docs/adopters/peclet.md.
-Still to build: playbook stats; python@1 calibration (LCOM4 into debt); cpp@0 calibration vs CodeScene; C++ public-header/literal static rules.
+- Tagged v0.2.0 (plugin 0.2.0). main at ec5aaea, 391 tests.
+- Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
+  main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
+- Adopters and where they stand:
+  - OpenFlowsheet S19 (repo-wide, W4 interface lane): re-pins to ec5aaea at its next
+    queue-idle window; `[gate] no_implicit_reexport` set before I-5b and I-9. Nothing open.
+  - pymrm c1 (public interface frozen): pinned 9095836, metric "both"; lane B done,
+    projected debt 1282.8 -> 547.1. Nothing open.
+  - Peclet (dem landed, flow F1-F3): re-pins @v0.2.0; builds and tests on TRS2 run only
+    through its session. Nothing open.
 
-Next action (old): `gate` with tiers in config (behaviour gate: base-regenerated references, determinism check,
-bitwise compare, mutant coverage check), then `playbook stats`, then plugin skills
-(setup, refactor-loop, healthy-coding) + reusable workflow. User: run CodeScene on
-OpenFlowsheet (needed for python@1 calibration and demo).
+## Next action
 
-Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeScene CLI access.
+Wait for the next adopter report and handle it as above. No job is running.
+
+## Open requests
+
+None from the user or from other sessions.
+
+## Later (not started)
+
+CodeScene calibration (user: later); restructure-mode warning for tests that patch a moved
+name; cpp@1 (`[&]` captures); docs-sync review lane, exemplars, C++ D1/D2 and public-header
+rules; restructure with build-file edits; the flaky
+tests/test_interface.py::test_exact_plan_passes_and_logs_interface (seen once, "HEAD's tree
+differs from the tree the gate judged"); possibly a python@1 profile for complexipy 9.
+
+## Key anchors
+
+- Gate: src/cce_code_health/gate.py (`gate`, `_benchmark`, `_fill`, `literal_drops`).
+- Interface rules: src/cce_code_health/interface.py (`public_api_problems`,
+  `old_path_importers`, `_callers`).
+- Clone detection: src/cce_code_health/duplication.py. Config keys: config.py.
+- Backend pins: pyproject.toml (complexipy==8.3.0 for python@0, lizard==1.26.0 for cpp@0).
