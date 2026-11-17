@@ -25,6 +25,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
+python@1 campaign: see docs/PY1_STATE.md (read it after this file).
 Campaign cpp@1 + zones CLOSED: v0.3.0 tagged 2026-11-17 at a2c3829 (Desk card cce-v030-release VERIFIED A,
 executed). cpp@1 is frozen (any change needs cpp@2). Peclet sent the v0.3.0 pin; it switches its gate
 from cpp@0 (719092b) to cpp@1 when it chooses. Work is reactive again (adopter reports).
@@ -44,19 +45,8 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- python@1: Desk card cce-python1-start filed with hub 2026-11-17 (A start now / B after pymrm c2 / C later;
-  docstrings in size D1 exclude / D2 count; recommended A+D1). Basis: pymrm-health notes in
-  ~/Code/pymrm_suite/worktrees/pymrm-health-notes/{codescene_vs_python0.md,solve_py_blind_review.md}.
-  Proposal: thresholds toward CodeScene (cognitive 10, params 4 private only, bumps like CodeScene),
-  new class-state smell (write fan-in >=3, init=False fields, dict-as-struct, positional tuple reads),
-  short-block duplication, docstrings out of size, validate vs CodeScene + blind reviews, playbook
-  anti-pattern "extract method communicating through new mutable fields". On A: think design pass first.
-  pymrm-health tells us when c2 (solve.py) starts.
-  Card filed by hub; exact action texts (verify with decision_desk_verify.py --action "<text>"):
-  A "start the codehealth python@1 profile design and implementation now, with docstring lines excluded from function and file size"
-  B "start the codehealth python@1 profile design and implementation now, with docstring lines counted in function and file size"
-  C "start the codehealth python@1 profile after pymrm campaign c2 has run"
-  D "keep python@1 on later"   (rec A)
+- python@1 campaign OPEN (Desk cce-python1-start A VERIFIED 2026-11-17). Position, gates, next action:
+  docs/PY1_STATE.md. pymrm-health tells us when its c2 (solve.py) starts; aim to have python@1 ready for it.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 

@@ -95,3 +95,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 - 2026-11-17 pymrm-health (c1-opt) numba reports fixed: 5d9f1a0 benchmark runs get a fresh NUMBA_CACHE_DIR, warm-up writes to ignored files noted (note, not failure); 240294e reference coverage counts a called numba function (sitecustomize hooks _DispatcherBase._compile_for_args), uncalled one named "JIT-compiled". Real numba 0.66 check in scratch. 512 tests. Stale untracked build/ moved out of the tree (it polluted self-diff with duplication).
 2026-11-17 pymrm-health heads-up: CodeScene solve.py 4.70 vs python@0 9.4; acked, awaiting its python@1 recommendation
 2026-11-17 python@1 Desk card cce-python1-start filed (pymrm-health recommendation, A+D1 recommended)
+2026-11-17 python@1 campaign opened (Desk cce-python1-start A VERIFIED); PY1_STATE.md, brief py1-design.md
