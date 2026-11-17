@@ -46,7 +46,11 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 ## Open requests
 
 - python@1 campaign: merged ffc4a30, all gates pass; pin sent to pymrm-health (c2 starts on it).
-  Release v0.4.0: DECISION-REQUEST cce-v040-release sent to hub (rec B: tag after c2's first steps).
+  Release v0.4.0: Desk card cce-v040-release filed by hub (rec B). Exact action texts for the verifier:
+  A "tag v0.4.0 at the current main of cce-code-health now and push the tag"
+  B "tag v0.4.0 of cce-code-health after pymrm campaign c2 has run its first steps on python@1 without a tool fix, at the main commit at that time, and push the tag"
+  C "do not tag v0.4.0 yet"
+  Before tagging: bump plugin version to 0.4.0 as for v0.3.0 (see that release commit), then tag.
   Position and gates: docs/PY1_STATE.md. A change to python@1 now needs python@2.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
