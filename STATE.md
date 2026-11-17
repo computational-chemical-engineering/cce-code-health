@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-16)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at 1bed7b9, 442 tests.
+- Tagged v0.2.0 (plugin 0.2.0). main at 317db57, 446 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -27,14 +27,18 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved the request in that
 session; cpp@0 stays frozen and stays Peclet's gate). Design DONE: docs/CPP1_LAYERS.md (think,
 Opus xhigh, with prototype docs/cpp1/proto.py and falsifiers docs/cpp1/f1.cpp); decision row
-2026-11-17 in docs/DECISIONS.md. Step 1 DONE (1bed7b9: src/cce_code_health/zones.py, tests/test_zones.py;
-byte-identity script scratchpad ident.sh: scan 9 Peclet + self@cf15245 + self diff, 22 files).
-Next: step 2 markers. Think review notes for it: annotate needs each function's head text (pass
-texts from analyze_ref, or have cpp_backend expose the head / split-lambda introducer); file_zone
-must skip rules with markers; catch-all must also mean "no markers". Step 3 note: once kernel
-lambdas are split, the enclosing function's nloc must drop the lambda lines (fn_nloc overlap).
-Later from the review: gate `zones` as data (debt_check out-param) for zone_ratchet/log; hide
-unchanged zone rows in diff text. Then cpp@1 rules (1)-(4), each with its falsifier first.
+2026-11-17 in docs/DECISIONS.md. Step 1 DONE (1bed7b9, paths) and step 2 DONE (317db57, markers:
+src/cce_code_health/zones.py, tests/test_zones.py). Byte-identity script: scratchpad ident.sh of the
+previous session (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files); rebuild it if gone.
+Peclet zones trial config (user globs > device K-only headers > device KOKKOS markers > host):
+README example plus docs/briefs/cpp1-layers-design.md addendum (dem has no K-only header).
+Next: cpp@1 rules in order (1) preprocessor/if constexpr, (2) loop credit, (3) kernel lambdas,
+(4) captures; each with its falsifier first (docs/CPP1_LAYERS.md lines 44-100, docs/cpp1/f1.cpp,
+prototype docs/cpp1/proto.py). cpp@1 is a NEW profile (cpp@0 frozen, bit-identical). Step 3 note
+from the think review: when kernel lambdas are split out, the enclosing function's nloc must drop
+the lambda lines (else fn_nloc double counts across zones); split lambdas get their zone from
+their introducer (KOKKOS_LAMBDA). Later: gate `zones` as data (debt_check out-param) for
+zone_ratchet/log; hide unchanged zone rows in diff text.
 Config key name `[[zones]]` is a DEFAULT: DECISION-REQUEST sent to hub (2026-11-17); keep the key
 in one place in config.py so a rename is one edit. Calibration data: shallow clones of the nine
 Peclet repos in the session scratchpad (.../scratchpad/peclet/peclet-<name>; if gone, re-clone
@@ -45,12 +49,13 @@ Peclet's suite-scan scope and layer globs: addendum of docs/briefs/cpp1-layers-d
 
 ## Open requests
 
-- peclet-health: cpp@1 + zones; step 1 pin 1bed7b9 sent 2026-11-17 (bridge, read not confirmed);
-  send again for markers and cpp@1. Told it dem's clone has no src/*_kernels.hpp (its glob).
+- peclet-health: cpp@1 + zones; pins 1bed7b9 (paths) and 317db57 (markers, with nine-repo zone
+  table) sent 2026-11-17. It trials at its next round boundary (WO-28 on dem running) and sends
+  its own nine-repo table. Send a pin per cpp@1 rule.
 - User (via hub): public name of the zones config key (default `[[zones]]`). Desk card
   `decisions/cce-zones-name` (hub agrees with A); act only on a VERIFIED sign-off. Asked hub to
-  extend the card to the output keys `zone`/`zones` (default: follow the config name); rename all
-  in one commit when signed.
+  extend the card to the output keys: card v3 options A keep zones/zone/zones, B layers/layer/layers,
+  C groups/group/group_zones (scan already has `groups`). Rename all in one commit when VERIFIED.
 
 ## Later (not started)
 

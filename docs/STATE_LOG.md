@@ -83,3 +83,4 @@ OpenFlowsheet (needed for python@1 calibration and demo).
 
 Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeScene CLI access.
 2026-11-17 zones step 1 (paths) 1bed7b9: report-only zones in scan/diff/gate; no-zones output byte-identical on 22 outputs; think review (Opus xhigh) no blockers, items 1/4/5 fixed (gate config check on malformed zones), 2/3/6/7/8 later; 442 tests; pin sent to peclet-health, output-key naming added to hub card.
+2026-11-17 zones step 2 (markers) 317db57: C++ function heads; falsifier on core/dem/flow agrees (77/104/320 marked heads, 1 bodiless decl, rest comments); 446 tests; nine-repo zone table + pin sent to peclet-health; hub card cce-zones-name v3 covers output keys (C = group/group_zones).
