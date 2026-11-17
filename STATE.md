@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-16)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at 534fa62, 508 tests.
+- Tagged v0.2.0 (plugin 0.2.0). main at e4688ce, 508 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -24,16 +24,20 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved it in that session;
-cpp@0 stays frozen and stays Peclet's gate). Design: docs/CPP1_LAYERS.md; decision rows 2026-11-17
-in docs/DECISIONS.md. ALL FOUR cpp@1 RULES SHIPPED: paths 1bed7b9, markers 317db57, rule (1)
-bee116e, (2) 5110771, (3) 8b03640, (4) captures 534fa62 (think-reviewed; capture count alone >8 w0.5,
-not params+captures; display smell many_captures; profile field kernel_this_macros). Peclet nine
-clones cpp@1 9678.2 / 62 brains (captures debt 514.5; median 4, p90 11, max 28).
-Next: wait for peclet-health's own nine-repo cpp@1 trial table; then release cpp@1 (freeze; a tag
-or release needs the user's go or a VERIFIED Desk card). Meanwhile, optional (not started): gate
-`zones` as data (debt_check out-param) for zone_ratchet/log; hide unchanged zone rows in diff text;
-rule (3) open notes (brain match by bare name, --target ambiguity, lambda#k renumbering).
+Campaign cpp@1 + zones: ALL FOUR RULES SHIPPED (design docs/CPP1_LAYERS.md; DECISIONS rows 2026-11-17).
+peclet-health's own nine-repo trial (TRS2, pin 534fa62) came back 2026-11-17: suite 9947.6 / 64 brain
+(cpp@0 11162.9 / 91), rules 1-3 right; on its advice captures threshold > 8 -> > 12 (e4688ce; my clones
+9678.2 -> 9349.7, brains 62). Zones name FINAL (Desk card cce-zones-name VERIFIED A, executed, c82b1ea).
+RELEASE PREPARED, NOT PUSHED: local branch release-0.3.0 at 46a0b5a (cpp@1 frozen, plugin 0.3.0,
+README @v0.3.0) on top of main e4688ce. DECISION-REQUEST sent to hub 2026-11-17 (suggested card
+cce-v030-release; A = fast-forward main to 46a0b5a, push, tag v0.3.0 at 46a0b5a, push tag; B hold;
+C captures > 11). On VERIFIED A: do exactly that, write `executed` to the card, send peclet-health the
+v0.3.0 pin, append STATE_LOG. If main moves before then, rebase release-0.3.0 and ask hub to update
+the card's commit id (the action names 46a0b5a). On C: change threshold to 11 (profiles.py, tests
+_wide sizes, README, CPP1_LAYERS, DECISIONS), new release commit, new card.
+Optional meanwhile (not started): gate `zones` as data (debt_check out-param) for zone_ratchet/log;
+hide unchanged zone rows in diff text; rule (3) open notes (brain match by bare name, --target
+ambiguity, lambda#k renumbering).
 Scratch tools (rebuild if gone): cpp@1 trial config
 /tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml (base.toml with cpp@1);
 byte-identity script /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh OUTDIR
@@ -47,10 +51,9 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- peclet-health: cpp@1 + zones; pins 1bed7b9 (paths) and 317db57 (markers, with nine-repo zone
-  table) sent 2026-11-17; bee116e (cpp@1 rule 1), 5110771 (rule 2) and 8b03640 (rule 3) and 534fa62 (rule 4, last rule) sent 2026-11-17 (bridge delivery unconfirmed).
-  It trials at its next round boundary (WO-28 on dem running) and sends its own nine-repo table,
-  which decides the cpp@1 release.
+- hub/user: DECISION-REQUEST tag v0.3.0 (sent 2026-11-17; see Next action).
+- peclet-health: told 2026-11-17 (bridge, delivery unconfirmed): captures > 12 at e4688ce, zones name
+  final, v0.3.0 pending; it keeps cpp@0 at 719092b as gate until the v0.3.0 pin arrives.
 
 ## Later (not started)
 
