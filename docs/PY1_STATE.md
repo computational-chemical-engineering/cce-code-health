@@ -45,6 +45,11 @@ Added by the think design pass 2026-11-17 (docs/py1/design.md; prototype numbers
 2026-11-17: design adopted (docs/py1/design.md, decisions logged). Next: implement in worktree
 ~/Code/cce-code-health-py1 (branch py1), brief docs/briefs/py1-implement.md; then G0, G5..G12, then
 G1..G4' on the frozen candidate commit.
+Running: implement agent (Opus) on brief docs/briefs/py1-implement.md since 2026-11-17, worktree
+~/Code/cce-code-health-py1 branch py1. If this session resets while it runs: check
+`git -C ~/Code/cce-code-health-py1 log --oneline main..py1` and docs/py1/results.md on py1; do not
+start a second implementer on the same tree. After it: review the diff (think, multi-module), run
+G11 and G1..G4' yourself, then merge py1 to main (no squash) and give pymrm-health the commit.
 
 Consumer: pymrm c2 starts as soon as python@1 is pinnable (send pymrm-health the commit). Order
 numjac.py, coupling.py, convect.py, then solve.py _NewtonRun (PR #48 merged as pymrm 13176bb; run G3 on that commit). c2 needs:
