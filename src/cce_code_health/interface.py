@@ -494,6 +494,19 @@ def old_path_importers(plan: dict, files: dict[str, str], roots, exempt: set[str
 
 # -- the exact public-API rule -----------------------------------------------------------------
 
+def _private_rename(po, no, pn, nn, tb, th, still_bound) -> list[str]:
+    """A `renamed` entry for a name outside the public API: bound in the old module at base, not
+    bound there at head (no shim, same rules as a public name), and newly bound in the new module."""
+    head = f"plan renamed {po}:{no} = {pn}:{nn}:"
+    if no not in bound(tb[po]):
+        return [f"{head} {no} is not bound in {po} at base"]
+    if still_bound(po, no, home=pn if no == nn else None):
+        return [f"{head} {no} is still bound in {po}"]
+    if pn not in th or nn not in bound(th[pn]) or (pn in tb and nn in bound(tb[pn])):
+        return [f"{head} {nn} is not new in {pn}"]
+    return []
+
+
 def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
                         homes: dict | None = None, roots=("src", "."),
                         own_use_imports: bool = False) -> tuple[list[str], dict]:
@@ -571,6 +584,10 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
         gone.pop(m, None)
     # name renames: old gone (no shim), new present, same API; members follow the top name
     for po, no, pn, nn in ren:
+        if "." not in no and po in api_b and no not in api_b[po]:   # a private name: bindings only
+            problems += _private_rename(po, no, pn, nn, tb, th, still_bound)
+            record["renamed"].append({"old": f"{po}:{no}", "new": f"{pn}:{nn}", "api": "private"})
+            continue
         g, h = gone.get(po, {}), new.get(pn, {})
         if no not in g or still_bound(po, no, home=pn if no == nn else None):
             problems.append(f"plan renamed {po}:{no} = {pn}:{nn}: {no} is still bound in {po}")

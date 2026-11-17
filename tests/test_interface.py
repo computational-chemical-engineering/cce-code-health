@@ -671,3 +671,38 @@ def test_text_caller_from_import_keeps_spacing_and_tabs():
     assert caller_problems(TP, [("M", "d.md", "d.md")], {"d.md": base}, {"d.md": head}, ["src"]) != []  # 2 modules
     base, head = "from app.types import Old\tas  O,Port\n", "from app.ports import New\tas  O,Port\n"
     assert caller_problems(TP, [("M", "d.md", "d.md")], {"d.md": base}, {"d.md": head}, ["src"]) == []
+
+
+# A moved private name (not in the public API) may be planned as `renamed` (OpenFlowsheet S19 I-12c).
+PRIV_B = {"run.py": "def _c(x):\n    return x\n\n\ndef run():\n    return _c(1)\n",
+          "replay.py": "def replay():\n    return 2\n"}
+PRIV_H = {"run.py": "from replay import replay\n\n\ndef run():\n    return replay()\n",
+          "replay.py": "def _c(x):\n    return x\n\n\ndef replay():\n    return _c(2)\n"}
+
+
+def test_private_rename_accepted():
+    assert check(PRIV_B, PRIV_H, {"renamed": {"run.py:_c": "replay.py:_c"}}) == []
+
+
+@pytest.mark.parametrize("head,why", [
+    ({**PRIV_H, "run.py": PRIV_H["run.py"] + "\n\ndef _c(x):\n    return x\n"}, "still bound"),
+    ({**PRIV_H, "run.py": "from replay import replay, _c\n\n\ndef run():\n    return replay()\n"}, "still bound"),
+    ({**PRIV_H, "replay.py": "def replay():\n    return 2\n"}, "is not new in"),
+])
+def test_private_rename_refused(head, why):
+    probs = check(PRIV_B, head, {"renamed": {"run.py:_c": "replay.py:_c"}})
+    assert any(why in p for p in probs), probs
+
+
+def test_private_rename_needs_base_binding():
+    probs = check(PRIV_B, PRIV_H, {"renamed": {"run.py:_zz": "replay.py:_c"}})
+    assert any("not bound" in p or "still bound" in p for p in probs), probs
+
+
+def test_private_rename_caller_follows():
+    plan = {"removed": [], "changed": [], "added": [], "callers": ["tests/**"],
+            "renamed": {"src/app/run.py:_c": "src/app/replay.py:_c"}}
+    base = "from app.run import _c, run\n\n\ndef test():\n    assert _c(1) == run()\n"
+    head = "from app.replay import _c\nfrom app.run import run\n\n\ndef test():\n    assert _c(1) == run()\n"
+    t = "tests/t.py"
+    assert caller_problems(plan, [("M", t, t)], {t: base}, {t: head}, ["src"]) == []
