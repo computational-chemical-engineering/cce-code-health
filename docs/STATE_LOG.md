@@ -96,3 +96,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-17 pymrm-health heads-up: CodeScene solve.py 4.70 vs python@0 9.4; acked, awaiting its python@1 recommendation
 2026-11-17 python@1 Desk card cce-python1-start filed (pymrm-health recommendation, A+D1 recommended)
 2026-11-17 python@1 campaign opened (Desk cce-python1-start A VERIFIED); PY1_STATE.md, brief py1-design.md
+2026-11-17 python@1 merged to main ffc4a30 (all gates pass; review fixes a72885e); pin to pymrm-health

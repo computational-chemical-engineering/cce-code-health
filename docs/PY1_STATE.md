@@ -42,20 +42,10 @@ Added by the think design pass 2026-11-17 (docs/py1/design.md; prototype numbers
 
 ## Position
 
-2026-11-17: design adopted (docs/py1/design.md, decisions logged). Next: implement in worktree
-~/Code/cce-code-health-py1 (branch py1), brief docs/briefs/py1-implement.md; then G0, G5..G12, then
-G1..G4' on the frozen candidate commit.
-Running: implement agent (Opus) on brief docs/briefs/py1-implement.md since 2026-11-17, worktree
-~/Code/cce-code-health-py1 branch py1. If this session resets while it runs: check
-`git -C ~/Code/cce-code-health-py1 log --oneline main..py1` and docs/py1/results.md on py1; do not
-start a second implementer on the same tree. After it: review the diff (think, multi-module), run
-G11 and G1..G4' yourself, then merge py1 to main (no squash) and give pymrm-health the commit.
-
-Consumer: pymrm c2 starts as soon as python@1 is pinnable (send pymrm-health the commit). Order
-numjac.py, coupling.py, convect.py, then solve.py _NewtonRun (PR #48 merged as pymrm 13176bb; run G3 on that commit). c2 needs:
-python@1 selectable via `[profiles] python = "python@1"` on a new campaign base, and the gate in
-refactor mode scoring python@1 debt AND the class-state smell (so it must reach the gate as debt or
-as a file/class smell the gate checks).
+2026-11-17: python@1 MERGED to main (ffc4a30, branch py1 no-squash; review fixes a72885e). All gates pass
+(G4' weak on a strict reading, see below). Next: tell pymrm-health the pin commit (c2 starts); worktree
+~/Code/cce-code-health-py1 can be removed. Release v0.4.0 needs a Desk card (not filed yet).
+python@1 is frozen from the moment an adopter pins it: any change needs python@2.
 
 ## Gate results (orchestrator, 2026-11-17, py1 at aa2f95e)
 
@@ -76,7 +66,10 @@ as a file/class smell the gate checks).
   (severity >= low), but only 3/6 at >= medium. Unflagged 14: 0 high (pass <= 3), 2 medium
   (IBMCoupled3DSMRModel, Monolith), 2 "no". The two highs are the top two flagged. Known false-positive
   pattern: accumulators/builders (_Reconstructor 14, EFHolder 8).
-- think diff review running (with the closure-state question added).
+- think diff review: no blockers; python@0 identical over 2081 extra files; fixed before merge
+  (a72885e): optimize-mode debt, nested-class writes, seed allowance (G11 rerun: 4 rejections, all
+  real; G0 8/8, G1 unchanged, G3 unchanged, 543 tests). Not fixed, documented: class matching by
+  unique name across files, rename-out-of-scope hole (same as debt), closure/alias/mutating-call escapes.
 
 ## Open decisions (default in force until changed)
 
