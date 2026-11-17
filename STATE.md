@@ -24,26 +24,31 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-Campaign cpp@1 + layers (peclet-health request 2026-11-17, approved by the user in that
-session's chat; cpp@0 stays frozen and stays Peclet's gate). Order: layer reporting first
-(matters most to Peclet), then cpp@1. Design brief docs/briefs/cpp1-layers-design.md sent to
-`think` (Opus xhigh, advice only); its answer goes to docs/CPP1_LAYERS.md before any code.
-Calibration data: shallow clones of the nine Peclet repos in the session scratchpad
-(.../scratchpad/peclet/peclet-<name>; re-clone with `gh repo clone ... -- --depth 1` if gone);
-cpp@0 baseline there with scratchpad/peclet/base.toml: total debt 10899.5, brain 89
-(core 798.2, geom 22.0, amr 1064.0, morton 11.0, flow 5614.9, pnm 319.3, dem 1485.8,
-voro 1438.9, coupling 145.4). Peclet's own suite scan: 11162.9, 91 brain (its scope).
-Asked peclet-health for its suite-scan.toml scope and its layer globs.
+Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved the request in that
+session; cpp@0 stays frozen and stays Peclet's gate). Design DONE: docs/CPP1_LAYERS.md (think,
+Opus xhigh, with prototype docs/cpp1/proto.py and falsifiers docs/cpp1/f1.cpp); decision row
+2026-11-17 in docs/DECISIONS.md. Next: step 1, zones with `paths` only + byte-identity test
+(no zones: scan/diff/gate output unchanged). Spec is complete enough for `implement` (Sonnet)
+or do it yourself; then step 2 markers; then cpp@1 rules (1)-(4), each with its falsifier first.
+Config key name `[[zones]]` is a DEFAULT: DECISION-REQUEST sent to hub (2026-11-17); keep the key
+in one place in config.py so a rename is one edit. Calibration data: shallow clones of the nine
+Peclet repos in the session scratchpad (.../scratchpad/peclet/peclet-<name>; if gone, re-clone
+with `gh repo clone computational-chemical-engineering/peclet-<name> -- --depth 1`); cpp@0
+baseline with scratchpad/peclet/base.toml: debt 10899.5, brain 89 (core 798.2, geom 22.0,
+amr 1064.0, morton 11.0, flow 5614.9, pnm 319.3, dem 1485.8, voro 1438.9, coupling 145.4).
+Peclet's suite-scan scope and layer globs: addendum of docs/briefs/cpp1-layers-design.md.
 
 ## Open requests
 
-None from the user or from other sessions.
+- peclet-health: cpp@1 + zones; send it the pin when step 1 (zones by paths) lands, and again
+  for markers and cpp@1.
+- User (via hub): public name of the zones config key (default `[[zones]]`).
 
 ## Later (not started)
 
 CodeScene calibration (user: later); benchmark tiers that skip or relax when the step's
 changed code is not run by the workload (pymrm c1: bench false rejections under load); restructure-mode warning for tests that patch a moved
-name; cpp@1 (`[&]` captures); docs-sync review lane, exemplars, C++ D1/D2 and public-header
+name; docs-sync review lane, exemplars, C++ D1/D2 and public-header
 rules; restructure with build-file edits; the flaky
 tests/test_interface.py::test_exact_plan_passes_and_logs_interface (seen once, "HEAD's tree
 differs from the tree the gate judged"); possibly a python@1 profile for complexipy 9.

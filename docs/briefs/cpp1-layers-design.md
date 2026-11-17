@@ -59,3 +59,20 @@ B. **cpp@1**, a new C++ profile (cpp@0 stays frozen, bit-identical, and stays Pe
 4. Order of work and what to defer.
 
 Advice only: do not edit files. Do not spawn sub-agents yourself.
+
+## Addendum (peclet-health, 2026-11-17): their scope and layer split
+
+suite-scan.toml: `[profiles] python = "python@0", cpp = "cpp@0"`;
+`[scope] include = ["src/*","include/*","python/*","bindings/*","tools/*","scripts/*","examples/*"]`.
+
+- Layer U (user-facing), by path globs: every *.py in scope; binding TUs src/*_bindings.cpp,
+  src/*_bindings*.hpp, python/*_bindings.cpp, bindings/*.cpp, bindings/*.h; examples/*.cpp.
+- H (host) and K (device) do NOT separate by path: header-only .hpp holds both a launch site and
+  its kernels. Proposal: a function-level tag. K = function or operator() marked
+  KOKKOS_INLINE_FUNCTION / KOKKOS_FUNCTION / KOKKOS_FORCEINLINE_FUNCTION, and (with cpp@1) the
+  body of a KOKKOS_LAMBDA / KOKKOS_CLASS_LAMBDA. H = every other C++ function outside U,
+  including launch sites (under cpp@0 a launch site with its lambdas is H).
+- Acceptable first version: U by globs versus the rest. Optional per-repo glob override for
+  K-only headers (dem src/*_kernels.hpp, pnm src/pore_kernels.hpp, coupling
+  src/coupling_kernels.hpp, coupling src/drag.hpp).
+- Their plan: U is priority 1, K ratchet-only.
