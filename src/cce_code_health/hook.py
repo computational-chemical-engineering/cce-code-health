@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 from . import config, gitio
-from .profiles import METRICS
 from .python_backend import analyze
 from .report import added_smells, file_report
 
@@ -32,7 +31,7 @@ def _repo_root(path: Path) -> Path | None:
 
 def _report(rel: str, text: str, cfg: config.Config) -> dict | None:
     p = cfg.profile
-    r = file_report(analyze(rel, text, p.varargs_params), 0, p)
+    r = file_report(analyze(rel, text, p.varargs_params, p.py_rules, p.clone_window, p.clone_min_nodes), 0, p)
     return None if r["error"] else r
 
 
@@ -43,7 +42,7 @@ def _invalid(r: dict | None) -> list:
 
 def _fn_line(f: dict, cfg: config.Config) -> str:
     t = cfg.profile.thresholds
-    parts = [f"{m} {f[m]} > {t[m]}" for m in METRICS if m in f["debt_parts"]]
+    parts = [f"{m} {f[m]} > {t[m]}" for m in cfg.profile.metrics if m in f["debt_parts"]]
     if f["brain"]:
         parts.append("brain function")
     qual = f["qualname"].split("::", 1)[1]

@@ -8,6 +8,14 @@ from .python_backend import FileMetrics, FunctionMetrics
 _DISPLAY_PENALTY = {"complex": (0.5, 2.0), "brain": (1.0, 3.0), "long": (0.3, 1.5),
                     "deep_nesting": (0.5, 2.0), "bumpy_road": (0.5, 1.5), "many_args": (0.2, 1.0),
                     "many_captures": (0.2, 1.0)}
+CLASS_STATE_PENALTY = (1.0, 2.0)   # python@1 display: per flagged class, cap
+
+
+def class_smells(classes: list[dict], p: Profile) -> list[dict]:
+    """python@1: classes whose state_writes exceed the profile's class_state_threshold. A list of
+    its own, not file_smells, so that moving a class to a new file is not a new file smell."""
+    return [{"name": c["name"], "line": c["line"], "smell": "class_state", "state_writes": c["state_writes"]}
+            for c in classes if c.get("state_writes", 0) > p.class_state_threshold]
 
 
 def allowed(allows, metric: str) -> bool:
@@ -66,14 +74,22 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
                           "end_line": fn.end, "nloc": fn.nloc,
                           **{m: fn.value(m) for m in p.metrics if m != "nloc"},
                           "debt": debt, "debt_parts": parts, "brain": is_brain(fn, p)})
+        if getattr(fn, "public", None) is not None:     # python@1
+            functions[-1]["public"] = fn.public
         if getattr(fn, "introducer", None):     # cpp@1 kernel lambda: its macro, a zone marker
             functions[-1]["introducer"] = fn.introducer
     penalty = sum(min(w * counts.get(s, 0), cap) for s, (w, cap) in _DISPLAY_PENALTY.items())
     penalty += {"huge_file": 2.0, "large_file": 1.0}.get(next((s for s in smells if "file" in s), ""), 0.0)
     penalty += 1.0 if "duplication" in smells else 0.0
+    state = {}
+    if "state" in p.py_rules:
+        cs = class_smells(fm.classes, p)
+        w, cap = CLASS_STATE_PENALTY
+        penalty += min(w * len(cs), cap)
+        state = {"class_smells": cs}
     return {"path": fm.path, "nloc": fm.nloc, "error": fm.error,
             "debt": round(sum(f["debt"] for f in functions), 3),
-            "file_smells": smells, "dup_fraction": round(dup_frac, 3), "dup_lines": dup_lines,
+            "file_smells": smells, **state, "dup_fraction": round(dup_frac, 3), "dup_lines": dup_lines,
             "health": round(max(1.0, 10.0 - penalty), 2),
             "functions": functions,
             "classes": fm.classes,
@@ -118,3 +134,45 @@ def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[
         if new:
             errors.append(f"{path}: new file smell(s) {', '.join(new)} (nloc {r['nloc']})")
     return errors, notes
+
+
+def _new_writes(old: dict | None, new: dict) -> str:
+    """'m1 writes a, b; m2 writes c': (method, channel) pairs of `new` channels not in `old`."""
+    old = old or {}
+    by: dict[str, list[str]] = {}
+    for a, ws in new.items():
+        for m in ws:
+            if m not in old.get(a, ()):
+                by.setdefault(m, []).append(a)
+    return "; ".join(f"{m} writes {', '.join(sorted(a))}" for m, a in sorted(by.items()))
+
+
+def class_state_rises(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[str]:
+    """python@1 class-state ratchet over the touched files (raw values; allow comments do not
+    count): a message for each class of the base touched files whose state_writes rose, and,
+    when none did, one for a rise of the total. Empty for profiles without class state."""
+    cls_b = [(p, c) for p, r in rb.items() for c in r.get("classes", []) if "state_writes" in c]
+    cls_h = [(p, c) for p, r in rh.items() for c in r.get("classes", []) if "state_writes" in c]
+    if not cls_b and not cls_h:
+        return []
+    counterpart = {h: b for _, b, h in changes if h}
+    base = {(p, c["name"]): c for p, c in cls_b}
+    by_name: dict[str, list] = {}
+    for p, c in cls_b:
+        by_name.setdefault(c["name"], []).append(c)
+    out = []
+    for p, c in sorted(cls_h, key=lambda x: (x[0], x[1]["line"])):
+        old = base.get((counterpart.get(p), c["name"]))
+        if old is None and len(by_name.get(c["name"], [])) == 1:    # moved to another file
+            old = by_name[c["name"]][0]
+        if old is not None and c["state_writes"] > old["state_writes"]:
+            out.append(f"class state rose: {c['name']} {old['state_writes']} -> {c['state_writes']} "
+                       f"({_new_writes(old['channels'], c['channels'])})")
+    sb = sum(c["state_writes"] for _, c in cls_b)
+    sh = sum(c["state_writes"] for _, c in cls_h)
+    if sh > sb and not out:
+        new = [f"{c['name']} {c['state_writes']}" for _, c in cls_h
+               if c["state_writes"] and c["name"] not in by_name]
+        out.append(f"class state rose over the touched files: {sb} -> {sh}"
+                   + (f" (new: {', '.join(new[:5])})" if new else ""))
+    return out
