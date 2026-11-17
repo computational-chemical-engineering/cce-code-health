@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-17)
 
-- Tagged v0.3.0 2026-11-17 at a2c3829 (plugin 0.3.0; cpp@1 frozen, captures > 12; zones). main 240294e, 512 tests.
+- Tagged v0.3.0 2026-11-17 at a2c3829 (plugin 0.3.0; cpp@1 frozen, captures > 12; zones). python@1 merged 2026-11-17 at ffc4a30 (main 297af5b+, 543 tests).
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -45,8 +45,9 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- python@1 campaign OPEN (Desk cce-python1-start A VERIFIED 2026-11-17). Position, gates, next action:
-  docs/PY1_STATE.md. pymrm-health tells us when its c2 (solve.py) starts; aim to have python@1 ready for it.
+- python@1 campaign: merged ffc4a30, all gates pass; pin sent to pymrm-health (c2 starts on it).
+  Release v0.4.0: DECISION-REQUEST cce-v040-release sent to hub (rec B: tag after c2's first steps).
+  Position and gates: docs/PY1_STATE.md. A change to python@1 now needs python@2.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
