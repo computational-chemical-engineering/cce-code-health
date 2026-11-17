@@ -45,6 +45,10 @@ class Profile:
     # branch per #if group and does not count `if constexpr` as a decision or a level;
     # "loop_credit" counts a nesting path that holds two loops or more one level less.
     cpp_rules: frozenset = frozenset()
+    # "kernels" (cpp@1 rule 3): lambdas introduced by these macros, or passed in brackets to
+    # these calls, are scored as functions of their own (cpp_kernels).
+    kernel_macros: tuple = ()
+    kernel_calls: tuple = ()
 
 
 PROFILES = {
@@ -66,7 +70,9 @@ PROFILES = {
 _CPP0 = PROFILES["cpp@0"]
 PROFILES["cpp@1"] = replace(
     _CPP0, name="cpp@1", thresholds=dict(_CPP0.thresholds), weights=dict(_CPP0.weights),
-    cpp_rules=frozenset({"preprocess", "loop_credit"}))
+    cpp_rules=frozenset({"preprocess", "loop_credit", "kernels"}),
+    kernel_macros=("KOKKOS_LAMBDA", "KOKKOS_CLASS_LAMBDA"),
+    kernel_calls=("parallel_for", "parallel_reduce", "parallel_scan"))
 
 
 def get(name: str) -> Profile:

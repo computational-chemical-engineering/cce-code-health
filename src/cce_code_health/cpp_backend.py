@@ -48,6 +48,7 @@ class CppFunctionMetrics:
     nesting: int
     params: int
     allows: list = field(default_factory=list)
+    introducer: str | None = None   # cpp@1 kernel lambda: its macro (zone marker), if any
 
     def value(self, metric: str) -> int:
         return getattr(self, metric)
@@ -208,36 +209,111 @@ def _lizard():
     return lizard
 
 
+def _run(lizard, path: str, text: str):
+    # The reader is chosen by suffix; lizard's C/C++ reader handles every C++ suffix.
+    return lizard.FileAnalyzer(lizard.get_extensions([])).analyze_source_code(path + ".cpp", text)
+
+
+def _record(f, nesting: int, lines: list[str], allows: list, name: str | None = None,
+            line: int | None = None) -> CppFunctionMetrics:
+    """Metrics of lizard function `f`; suppressions from the line above its head (found
+    from `line`, default lizard's start line) to the line of its opening brace."""
+    line = f.start_line if line is None else line
+    first, brace = _head_lines(lines, line, f.end_line)
+    return CppFunctionMetrics(
+        name=name or re.sub(r"\s+(?=\W)|(?<=\W)\s+", "", f.name), line=line, end=f.end_line,
+        nloc=f.nloc, ccn=f.cyclomatic_complexity, nesting=nesting, params=f.parameter_count,
+        allows=[a for a in allows if not a.file_level and first - 1 <= a.line <= brace])
+
+
+def _records(function_list, shown: str, opts: tuple, lines: list[str], allows: list) -> list:
+    """Records of lizard's functions, nesting from the tokens of `shown` on their lines."""
+    toks, _ = tokens(shown)
+    tok_lines = [ln for ln, _ in toks]
+    out = []
+    for f in function_list:
+        lo, hi = bisect_left(tok_lines, f.start_line), bisect_right(tok_lines, f.end_line)
+        out.append(_record(f, nesting_depth([t for _, t in toks[lo:hi]], *opts), lines, allows))
+    return out
+
+
+def _split(lizard, path: str, texts: tuple, info, profile, opts: tuple, lines, allows) -> list:
+    """cpp@1 rule (3): the parents with kernel bodies blanked, then one record per kernel
+    lambda (cpp_kernels). `texts`: (source, shown, measured). Falls back to the unsplit
+    records when the split loses a parent or a lambda, or changes the file's sum of
+    CCN - 1 (a half-written file): the split only moves complexity, never drops it."""
+    from . import cpp_kernels  # noqa: PLC0415 (import cycle)
+    unsplit = _records(info.function_list, texts[1], opts, lines, allows)
+    spans = [(f.name, f.start_line, f.end_line) for f in info.function_list]
+    toks, ks = cpp_kernels.kernels(texts[1], profile.kernel_macros, profile.kernel_calls, spans)
+    if not ks:
+        return unsplit
+    try:
+        out = _split_records(lizard, path, texts, (toks, ks, info), opts, lines, allows)
+    except Exception:  # noqa: BLE001 (lizard raises various errors on odd input)
+        out = None
+    if out is None or sum(r.ccn - 1 for r in out) != sum(r.ccn - 1 for r in unsplit):
+        return unsplit
+    return out
+
+
+def _split_records(lizard, path: str, texts: tuple, found: tuple, opts, lines, allows):
+    """Records of the split, or None if a kernel lost its parent or its lizard function.
+    NLOC: each function keeps its whole NLOC minus that of its direct kernel lambdas, so
+    the file's sum of function NLOC is the unsplit one (a launch line is not counted twice)."""
+    from . import cpp_kernels  # noqa: PLC0415 (import cycle)
+    source, shown, measured = texts
+    toks, ks, info = found
+    ranges = [cpp_kernels.body_range(toks, k) for k in ks]
+    parents = _run(lizard, path, cpp_kernels.blank(measured, ranges)).function_list
+    out = _records(parents, cpp_kernels.blank(shown, ranges), opts, lines, allows)
+    whole = {(f.start_line, f.end_line): f.nloc for f in info.function_list}
+    keys = {(r.name, r.line, r.end): r for r in out}
+    lams = cpp_kernels.lambdas(source, shown, measured, toks, ks, list(keys))
+    if lams is None or any((r.line, r.end) not in whole for r in out):
+        return None
+    full = {id(r): whole[(r.line, r.end)] for r in out}       # whole NLOC per record
+    taken = {id(r): 0 for r in out}                             # NLOC of direct lambdas
+    named = {}
+    for lam in lams:
+        fl = _run(lizard, path, lam.text).function_list
+        if not fl:
+            return None
+        body = [t for _, t in tokens(lam.body)[0]][1:-1]
+        rec = _record(fl[0], nesting_depth(body, *opts), lines, allows, name=lam.name, line=lam.line)
+        rec.introducer = lam.introducer
+        full[id(rec)] = _run(lizard, path, lam.full).function_list[0].nloc if lam.full else rec.nloc
+        taken[id(rec)] = 0
+        parent = keys[lam.parent[1]] if lam.parent[0] == "fn" else named[lam.parent[1]]
+        taken[id(parent)] += full[id(rec)]
+        named[lam.name] = rec
+        out.append(rec)
+    for r in out:
+        r.nloc = max(full[id(r)] - taken[id(r)], 0)
+    return sorted(out, key=lambda r: r.line)
+
+
 def analyze(path: str, source: str, profile=None) -> FileMetrics:
     """Metrics of one C++ file. A profile with the "preprocess" rule (cpp@1) measures the
-    view of cpp_view (one branch per #if group, `if constexpr` not a decision); lines,
-    head lines and suppressions always come from the source, which the view keeps aligned."""
+    view of cpp_view (one branch per #if group, `if constexpr` not a decision); with the
+    "kernels" rule, kernel lambdas are functions of their own (cpp_kernels). Lines, head
+    lines and suppressions always come from the source, which the views keep aligned."""
     lizard = _lizard()
     allows = parse_allows(source, ALLOW_RE, SMELL_NAMES)
     rules = profile.cpp_rules if profile is not None else frozenset()
-    flat_constexpr, loop_credit = "preprocess" in rules, "loop_credit" in rules
+    opts = ("preprocess" in rules, "loop_credit" in rules)
     shown = measured = source
-    if flat_constexpr:
+    if opts[0]:
         from .cpp_view import select_branches, unmark_constexpr  # noqa: PLC0415 (import cycle)
         shown = select_branches(source)
         measured = unmark_constexpr(shown)
     try:
-        # The reader is chosen by suffix; lizard's C/C++ reader handles every C++ suffix.
-        info = lizard.FileAnalyzer(lizard.get_extensions([])).analyze_source_code(
-            path + ".cpp", measured)
+        info = _run(lizard, path, measured)
     except Exception as exc:  # noqa: BLE001 (lizard raises various errors on odd input)
         return FileMetrics(path, 0, [], allows, error=f"lizard: {exc}")
-    toks, _ = tokens(shown)
-    tok_lines = [ln for ln, _ in toks]
     lines = source.splitlines()
-    funcs = []
-    for f in info.function_list:
-        first, brace = _head_lines(lines, f.start_line, f.end_line)
-        lo, hi = bisect_left(tok_lines, f.start_line), bisect_right(tok_lines, f.end_line)
-        funcs.append(CppFunctionMetrics(
-            name=re.sub(r"\s+(?=\W)|(?<=\W)\s+", "", f.name), line=f.start_line,
-            end=f.end_line, nloc=f.nloc, ccn=f.cyclomatic_complexity,
-            nesting=nesting_depth([t for _, t in toks[lo:hi]], flat_constexpr, loop_credit),
-            params=f.parameter_count,
-            allows=[a for a in allows if not a.file_level and first - 1 <= a.line <= brace]))
+    if "kernels" in rules:
+        funcs = _split(lizard, path, (source, shown, measured), info, profile, opts, lines, allows)
+    else:
+        funcs = _records(info.function_list, shown, opts, lines, allows)
     return FileMetrics(path, info.nloc, funcs, allows)

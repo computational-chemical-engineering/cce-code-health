@@ -94,6 +94,30 @@ live branch; taking the best branch among those whose balance equals the first's
 Rule (2) as shipped (2026-11-17): the path rule above, in _NestingScan.level; Peclet nine repos
 cpp@1 10609.7 -> 10162.7 debt, brains 84 unchanged.
 
+Rule (3) as shipped (src/cce_code_health/cpp_kernels.py, 2026-11-17; Peclet nine repos cpp@1
+10162.7 / 84 -> 9163.7 / 62 brains; 1302 kernel lambdas; sum of CCN - 1 and of function NLOC
+unchanged in all 263 C++ files; per zone (zones trial config, cpp@1 without captures) device
+2392.5 / 19, host 5974.9 / 40, user 1065.7 / 5). Beyond the design, after a think review:
+- NLOC is exact: a function keeps its whole NLOC minus the whole NLOC of its direct kernel
+  lambdas, so the launch and closing lines are not counted twice (sum per file conserved).
+- Fallback: when the split loses a parent or a lambda, a lizard rerun fails, or the file's sum of
+  CCN - 1 changes (a half-written file), the file is measured unsplit. Brackets pair only with
+  their own kind.
+- A macro lambda at file scope that lizard reads as a function named after the macro is that
+  function, not split.
+- Names: label whitespace runs become `_`; `lambda#k` counts the parent's unlabelled kernels;
+  a repeated name gets `#2`; a nested kernel is named under its enclosing kernel.
+- Record `introducer` (the kernel's macro, or the enclosing kernel's) is added to the zone head,
+  because the head scan stops at the first `{` on a launch line (`MD({0,0},{n,n}), KOKKOS_LAMBDA`).
+- The lambda is scored on its original lines (the prototype pulled the body up to the head line:
+  one or two NLOC less for a `{` or specifiers on their own line).
+Open notes (review): new brains are matched on the bare name across files (gate.py:1430,
+cli.py:169, zones.py:144), so a repeated `run::lambda#1` elsewhere can hide a new brain; matching
+on qualname would be stricter. A short `--target path::compute` can be ambiguous when a Kokkos
+label repeats the parent's name. Adding an unlabelled kernel above others renumbers `lambda#k`
+(advise labels). cpp@0 suppressions on a parent's head do not cover its lambdas. A lambda's head
+scan also crosses a braceless `for (...)` line above the launch (suppression slightly wider).
+
 ## Falsifiers (docs/cpp1/f1.cpp; expected numbers)
 
 - F1 if-constexpr chain with `?`: CCN 4 -> 2; nesting cpp@0 2, cpp@1 0.

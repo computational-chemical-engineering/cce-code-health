@@ -64,6 +64,8 @@ def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:
                           "end_line": fn.end, "nloc": fn.nloc,
                           **{m: fn.value(m) for m in p.metrics if m != "nloc"},
                           "debt": debt, "debt_parts": parts, "brain": is_brain(fn, p)})
+        if getattr(fn, "introducer", None):     # cpp@1 kernel lambda: its macro, a zone marker
+            functions[-1]["introducer"] = fn.introducer
     penalty = sum(min(w * counts.get(s, 0), cap) for s, (w, cap) in _DISPLAY_PENALTY.items())
     penalty += {"huge_file": 2.0, "large_file": 1.0}.get(next((s for s in smells if "file" in s), ""), 0.0)
     penalty += 1.0 if "duplication" in smells else 0.0

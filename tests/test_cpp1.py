@@ -1,4 +1,6 @@
 """cpp@1 rules (docs/CPP1_LAYERS.md). Falsifiers F1-F6 come from docs/cpp1/f1.cpp."""
+from dataclasses import replace
+
 import pytest
 
 pytest.importorskip("lizard")
@@ -194,3 +196,143 @@ def test_f4_loop_credit():
 ])
 def test_loop_credit_paths(code, depth):
     assert nesting_depth([t for _, t in tokens(code)[0]], loop_credit=True) == depth
+
+
+# Rule (3): kernel lambdas are functions of their own.
+F5 = """\
+void s(View a, View b, int n) {
+  const double dt = 0.1;
+  Kokkos::parallel_for("k", n, [a, &b, c = 2 * n](const int i) { a(i) = b(i) + c; });
+  Kokkos::parallel_for("k2", n, KOKKOS_LAMBDA(const int i) { if (i) a(i) = dt * b(i) + n; });
+}
+"""
+NO_SPLIT = replace(CPP1, cpp_rules=CPP1.cpp_rules - {"kernels"})
+
+
+def ccn_sum(src, profile):
+    return sum(f.ccn - 1 for f in analyze("f.cpp", src, profile).functions)
+
+
+def test_f5_kernel_lambdas_split():
+    f = fns(F5, CPP1)
+    assert sorted(f) == ["s", "s::k", "s::k2"]
+    assert (f["s"].ccn, f["s::k"].ccn, f["s::k2"].ccn) == (1, 1, 2)
+    assert (f["s::k2"].nesting, f["s::k2"].params, f["s::k2"].line, f["s::k2"].end) == (1, 1, 4, 4)
+    assert fns(F5, CPP0)["s"].ccn == 2
+    assert ccn_sum(F5, CPP1) == ccn_sum(F5, NO_SPLIT) == 1
+
+
+MULTI = """\
+namespace ns {
+template <class P>
+void run(P p, int n) {
+  if (n > 2) n--;
+  Kokkos::parallel_for(
+      "outer", Kokkos::TeamPolicy<>(n, 4),
+      KOKKOS_LAMBDA(const member_t& m) {
+        for (int j = 0; j < 4; ++j) {
+          if (j && n) p(j);
+        }
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(m, n), [&](int i) {
+          while (i > 0) { if (i % 2) --i; --i; }
+        });
+      });
+  Kokkos::parallel_reduce(n, KOKKOS_CLASS_LAMBDA(int i, double& s) mutable {
+    s += i > 1 ? 1.0 : 0.0;
+  }, total);
+  std::sort(v.begin(), v.end(), [](int x, int y) { return x < y || x == 0; });
+  auto f = [&](int i) { if (i) return 1; return 0; };
+  Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) { p(i); });
+  Kokkos::parallel_for("outer", n, KOKKOS_LAMBDA(int i) { p(i); });
+}
+}
+"""
+
+
+def test_nested_and_unlabelled_kernels():
+    f = fns(MULTI, CPP1)
+    assert sorted(f) == ["ns::run", "ns::run::lambda#1", "ns::run::lambda#2", "ns::run::outer",
+                         "ns::run::outer#2", "ns::run::outer::lambda#1"]
+    outer, inner = f["ns::run::outer"], f["ns::run::outer::lambda#1"]
+    assert (outer.ccn, outer.nesting, outer.line, outer.end) == (4, 2, 7, 14)
+    assert (inner.ccn, inner.nesting, inner.params, inner.line) == (3, 2, 1, 11)
+    red = f["ns::run::lambda#1"]                       # parallel_reduce, `mutable` skipped
+    assert (red.ccn, red.params, red.line, red.end) == (2, 2, 15, 17)
+    # the parent keeps its own if, the std::sort comparator (||) and the named lambda (if)
+    assert f["ns::run"].ccn == 1 + 1 + 1 + 1
+    assert ccn_sum(MULTI, CPP1) == ccn_sum(MULTI, NO_SPLIT)
+
+
+def test_parent_nloc_drops_kernel_lines():
+    f1, f0 = fns(MULTI, CPP1), fns(MULTI, NO_SPLIT)
+    assert (f0["ns::run"].nloc, f1["ns::run"].nloc) == (20, 7)   # keeps lines 3-6, 18, 19, 22
+    assert (f0["ns::run"].nesting, f1["ns::run"].nesting) == (2, 1)
+
+
+def test_kernel_suppression_from_line_above_launch():
+    src = ("void s(int n) {\n"
+           "  // codehealth: allow ccn -- kernel dispatch\n"
+           "  Kokkos::parallel_for(\"k\",\n"
+           "      n, KOKKOS_LAMBDA(int i) { if (i) g(i); });\n"
+           "}\n")
+    f = fns(src, CPP1)
+    assert [a.line for a in f["s::k"].allows] == [2]
+    assert f["s"].allows == []
+
+
+def test_kernel_outside_a_function_and_cpp0_unsplit():
+    src = "auto g = KOKKOS_LAMBDA(int i) { if (i) h(i); };\nvoid s() { parallel_for(1, [=](int i) { if (i) h(i); }); }\n"
+    # lizard reads the file-scope lambda as a function named KOKKOS_LAMBDA; it is not split
+    assert sorted(fns(src, CPP1)) == ["KOKKOS_LAMBDA", "s", "s::lambda#1"]
+    assert sorted(fns(src, CPP0)) == ["KOKKOS_LAMBDA", "s"]
+
+
+def test_file_nloc_unchanged_by_split():
+    assert analyze("f.cpp", MULTI, CPP1).nloc == analyze("f.cpp", MULTI, NO_SPLIT).nloc
+
+
+def test_kernel_zone_from_its_introducer():
+    from cce_code_health.zones import annotate
+    rules = [{"name": "device", "markers": ["KOKKOS_LAMBDA"]}, {"name": "host"}]
+    fm = analyze("f.cpp", F5, CPP1)
+    funcs = [{"name": f.name, "line": f.line, "end_line": f.end} for f in fm.functions]
+    reports = {"f.cpp": {"functions": funcs}}
+    annotate(reports, rules, {"f.cpp": F5})
+    assert {f["name"]: f["zone"] for f in funcs} == {"s": "host", "s::k": "host", "s::k2": "device"}
+
+
+def test_kernel_zone_survives_braces_before_the_macro_and_nesting():
+    from cce_code_health.zones import annotate
+    src = ("void s(int n) {\n"
+           "  parallel_for(\"md\", MD({0, 0}, {n, n}), KOKKOS_LAMBDA(int i, int j) {\n"
+           "    parallel_for(R(i), [&](int k) { if (k) g(k); });\n"
+           "  });\n"
+           "  parallel_for(n, [=](int i) { g(i); });\n"
+           "}\n")
+    fm = analyze("f.cpp", src, CPP1)
+    assert {f.name: f.introducer for f in fm.functions} == {
+        "s": None, "s::md": "KOKKOS_LAMBDA", "s::md::lambda#1": "KOKKOS_LAMBDA", "s::lambda#1": None}
+    funcs = [{"name": f.name, "line": f.line, "end_line": f.end,
+              **({"introducer": f.introducer} if f.introducer else {})} for f in fm.functions]
+    annotate({"f.cpp": {"functions": funcs}}, [{"name": "K", "markers": ["KOKKOS_LAMBDA"]},
+                                                {"name": "H"}], {"f.cpp": src})
+    assert [f["zone"] for f in funcs] == ["H", "K", "K", "H"]
+
+
+@pytest.mark.parametrize("src", [F5, MULTI])
+def test_function_nloc_sum_conserved(src):
+    assert (sum(f.nloc for f in analyze("f.cpp", src, CPP1).functions)
+            == sum(f.nloc for f in analyze("f.cpp", src, NO_SPLIT).functions))
+
+
+def test_half_written_file_falls_back_to_unsplit():
+    src = MULTI.replace("while (i > 0) {", "while (i > 0) )")     # a stray ) in a kernel
+    one, two = analyze("f.cpp", src, CPP1).functions, analyze("f.cpp", src, NO_SPLIT).functions
+    assert sum(f.ccn - 1 for f in one) == sum(f.ccn - 1 for f in two)
+    assert all("None" not in f.name for f in one)
+
+
+def test_mismatched_brackets_are_not_paired():
+    from cce_code_health.cpp_kernels import code_tokens, find_kernels
+    toks = code_tokens("f(KOKKOS_LAMBDA(int i) { g(i]; });")
+    assert find_kernels(toks, {"KOKKOS_LAMBDA"}, set()) == []

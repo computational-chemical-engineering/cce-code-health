@@ -8,7 +8,8 @@ markers whose paths match. A function's zone is the name of the first rule whose
 file and, if the rule has markers, one of whose markers occurs in the function's head: the lines
 from the first declaration line (template and return-type lines above the name, as
 cpp_backend._head_lines finds them) to the opening brace, comments blanked. Markers apply to C++
-functions only; a Python function is matched as if it had an empty head. Anything no rule
+functions only; a Python function is matched as if it had an empty head. A cpp@1 kernel lambda's
+head also holds its `introducer` (its macro, or that of the kernel around it). Anything no rule
 matches is in zone "-" (shown, never dropped).
 """
 from __future__ import annotations
@@ -97,6 +98,7 @@ def annotate(reports: dict[str, dict], rules: list[dict], texts: dict[str, str])
             lines = blank_comments(texts[path]).splitlines()
         for f in r["functions"]:
             head = head_identifiers(lines, f["line"], f["end_line"]) if lines is not None else set()
+            head |= {f["introducer"]} if "introducer" in f else set()   # cpp@1 kernel lambda
             f["zone"] = function_zone(rules, path, head) if marked else r["zone"]
 
 

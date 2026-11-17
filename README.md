@@ -167,9 +167,15 @@ differs from the first live branch's), so code under `#ifdef`/`#else` no longer 
 unbalanced braces across branches no longer make lizard drop the functions that follow.
 `if constexpr` is not a decision, and `if constexpr`, `else if constexpr` and their else open no
 nesting level. Rule (2), in place: a nesting path that holds two loops or more (for, while, do)
-counts one level less, so a triple loop with an `if` inside scores nesting 3, not 4. Lines and
-suppressions refer to the source as written. Rules still to come: kernel lambdas scored as
-functions, captures.
+counts one level less, so a triple loop with an `if` inside scores nesting 3, not 4. Rule (3), in
+place: a kernel lambda (`KOKKOS_LAMBDA(...)` or `KOKKOS_CLASS_LAMBDA(...)` then `{`, or a
+`[...]` lambda passed directly to `parallel_for`, `parallel_reduce` or `parallel_scan`) inside a
+function is scored as a function of its own, named `<enclosing>::<label>` after the call's
+string label (else `<enclosing>::lambda#1`, `#2`, ...); the enclosing function no longer counts
+its body (CCN, NLOC, nesting). A lambda can be a brain function. A suppression for it goes on
+the line above the launch statement or on the lines up to the lambda's `{`; its zone is read
+from that head, so `KOKKOS_LAMBDA` can be a zone marker. Lines and suppressions refer to the
+source as written. Rule still to come: captures.
 
 `scan`, `diff`, `hotspots` and the gate's debt check cover C++ files. The gate's static rules
 `literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static
