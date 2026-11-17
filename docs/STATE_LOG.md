@@ -82,3 +82,4 @@ bitwise compare, mutant coverage check), then `playbook stats`, then plugin skil
 OpenFlowsheet (needed for python@1 calibration and demo).
 
 Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeScene CLI access.
+2026-11-17 zones step 1 (paths) 1bed7b9: report-only zones in scan/diff/gate; no-zones output byte-identical on 22 outputs; think review (Opus xhigh) no blockers, items 1/4/5 fixed (gate config check on malformed zones), 2/3/6/7/8 later; 442 tests; pin sent to peclet-health, output-key naming added to hub card.
