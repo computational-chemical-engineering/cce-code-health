@@ -20,7 +20,7 @@ See [docs/DESIGN.md](docs/DESIGN.md). License: MIT.
 ## Usage (0.2)
 
 ```bash
-pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.2.0
+pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.3.0
 codehealth scan                      # score in-scope files in the working tree
 codehealth diff --base origin/main   # ratchet: fail (exit 1) if the change adds debt
 codehealth hotspots --top 20         # rank files by commits x debt (follows renames)
@@ -158,7 +158,7 @@ do, switch and try open a level, braced or not; `else if`, else and catch do not
 use `// codehealth: allow ccn,nesting -- reason` on the line above the declaration (above its
 `template` line, if any) or on the lines up to its opening brace, and `allow-file`.
 
-Profile `cpp@1` is in development (not frozen; released only after a Peclet run; design in
+Profile `cpp@1` is frozen in v0.3.0 (released after a Peclet nine-repo run; design in
 docs/CPP1_LAYERS.md). It has the thresholds and weights of `cpp@0`, plus the metric `captures`, and measures a preprocessed
 view of each file. Rule (1), in place: of every `#if`/`#ifdef`/`#ifndef` group one branch is
 measured (`#if 0`, `#if false` and `#elif 0` are dead; after `#if 1` the later branches are dead;

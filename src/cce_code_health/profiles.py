@@ -7,8 +7,8 @@ cpp@0 (C++, experimental) is uncalibrated too: thresholds and weights by analogy
 python@0, with cyclomatic complexity (lizard's CCN) in place of cognitive complexity. A
 brain function there has CCN > 25 and NLOC > 70.
 
-cpp@1 (in development, not frozen) keeps cpp@0's numbers and changes what is measured
-(cpp_rules; docs/CPP1_LAYERS.md).
+cpp@1 (frozen in v0.3.0, after a Peclet run) keeps cpp@0's numbers, adds the metric captures
+(> 12, w0.5) and changes what is measured (cpp_rules; docs/CPP1_LAYERS.md).
 """
 from __future__ import annotations
 
@@ -68,8 +68,7 @@ PROFILES = {
         table_functions=frozenset({"NB_MODULE", "PYBIND11_MODULE", "BOOST_PYTHON_MODULE"}),
     ),
 }
-# In development, not frozen: rules are added one by one (docs/CPP1_LAYERS.md) and the
-# profile is released only after a Peclet run. Thresholds and weights of cpp@0, plus captures
+# Frozen in v0.3.0 after the Peclet nine-repo trial (docs/CPP1_LAYERS.md). Thresholds and weights of cpp@0, plus captures
 # (> 12, weight 0.5; the capture count alone, params are charged on their own; 12 after the
 # Peclet trial: > 8 flagged 17.5 % of kernels, > 12 flags 6.1 %, docs/CPP1_LAYERS.md).
 _CPP0 = PROFILES["cpp@0"]
