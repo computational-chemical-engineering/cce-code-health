@@ -19,8 +19,8 @@ kernels (`auto b = [&]...; parallel_for(n, b)`), splitting non-kernel lambdas, f
 
 ## Zones
 
-- Config name `[[zones]]` (DEFAULT, pending the user's choice of public name; `[[architecture.layers]]`
-  already means import order and `[gate] tier` is taken). Keep the key in one place in config.py.
+- Config name `[[zones]]`, output keys `zone`/`zones` (the user's choice, Decision Desk card
+  cce-zones-name, 2026-11-17; `[[architecture.layers]]` already means import order and `[gate] tier` is taken). Keep the key in one place in config.py.
 - Each entry is one rule: `name`, optional `paths` (globs via config.match; default all), optional
   `markers` (identifiers in a C++ declaration head). Rules are ordered; first match wins; several
   rules may share a name.

@@ -43,7 +43,7 @@ byte-identity script /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-b
 brain 89); conservation /tmp/claude-1000/-home-eajfpeters-Code/54215b1c-269c-47f3-8708-9fa8bc19bd46/scratchpad/conserve.py PECLET_DIR;
 capture stats /tmp/claude-1000/-home-eajfpeters-Code/04d9439e-3ffc-4be1-b736-2e124d39fd21/scratchpad/capstats.py SCANDIR PECLET_DIR.
 Run pytest as `.venv/bin/python -m pytest` (a PATH= prefix breaks 49 tier tests: exit 127).
-Config key name `[[zones]]` is a DEFAULT pending the user (see Open requests); key in one place in config.py.
+Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A on Desk card cce-zones-name (VERIFIED, executed).
 
 ## Open requests
 
@@ -51,10 +51,6 @@ Config key name `[[zones]]` is a DEFAULT pending the user (see Open requests); k
   table) sent 2026-11-17; bee116e (cpp@1 rule 1), 5110771 (rule 2) and 8b03640 (rule 3) and 534fa62 (rule 4, last rule) sent 2026-11-17 (bridge delivery unconfirmed).
   It trials at its next round boundary (WO-28 on dem running) and sends its own nine-repo table,
   which decides the cpp@1 release.
-- User (via hub): public name of the zones config key (default `[[zones]]`). Desk card
-  `decisions/cce-zones-name` (hub agrees with A); act only on a VERIFIED sign-off. Asked hub to
-  extend the card to the output keys: card v3 options A keep zones/zone/zones, B layers/layer/layers,
-  C groups/group/group_zones (scan already has `groups`). Rename all in one commit when VERIFIED.
 
 ## Later (not started)
 
