@@ -24,7 +24,16 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-Wait for the next adopter report and handle it as above. No job is running.
+Campaign cpp@1 + layers (peclet-health request 2026-11-17, approved by the user in that
+session's chat; cpp@0 stays frozen and stays Peclet's gate). Order: layer reporting first
+(matters most to Peclet), then cpp@1. Design brief docs/briefs/cpp1-layers-design.md sent to
+`think` (Opus xhigh, advice only); its answer goes to docs/CPP1_LAYERS.md before any code.
+Calibration data: shallow clones of the nine Peclet repos in the session scratchpad
+(.../scratchpad/peclet/peclet-<name>; re-clone with `gh repo clone ... -- --depth 1` if gone);
+cpp@0 baseline there with scratchpad/peclet/base.toml: total debt 10899.5, brain 89
+(core 798.2, geom 22.0, amr 1064.0, morton 11.0, flow 5614.9, pnm 319.3, dem 1485.8,
+voro 1438.9, coupling 145.4). Peclet's own suite scan: 11162.9, 91 brain (its scope).
+Asked peclet-health for its suite-scan.toml scope and its layer globs.
 
 ## Open requests
 
