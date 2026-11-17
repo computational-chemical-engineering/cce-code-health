@@ -30,6 +30,12 @@ Gates the design pass adds are appended below, before their runs.
 
 2026-11-17: campaign opened. Next: think design pass (brief docs/briefs/py1-design.md).
 
+Consumer: pymrm c2 starts as soon as python@1 is pinnable (send pymrm-health the commit). Order
+numjac.py, coupling.py, convect.py; solve.py _NewtonRun only after pymrm PR #48 merges. c2 needs:
+python@1 selectable via `[profiles] python = "python@1"` on a new campaign base, and the gate in
+refactor mode scoring python@1 debt AND the class-state smell (so it must reach the gate as debt or
+as a file/class smell the gate checks).
+
 ## Open decisions (default in force until changed)
 
 - none yet
