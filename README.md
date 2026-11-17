@@ -42,10 +42,14 @@ brain}; `groups` (with `--group-depth`) an object keyed by prefix with the `tota
 
 **Zones** report debt per layer of a repo (for example user-facing, device and host code); they
 never change pass/fail, and without them every output is unchanged. Each `[[zones]]` entry is a
-rule with a `name` and optional `paths` (globs as in `[scope]`; absent = every file). Rules are
-ordered, the first whose paths match a file gives its zone, several rules may share a name, and a
-file no rule matches is in zone `-` (shown, never dropped; `config --check` warns when no rule is
-a catch-all). A function is in its file's zone (function-level markers are planned).
+rule with a `name`, optional `paths` (globs as in `[scope]`; absent = every file) and optional
+`markers` (C++ identifiers). Rules are ordered and several may share a name. A file's zone comes
+from the first rule without markers whose paths match it. A function's zone comes from the first
+rule whose paths match its file and, if the rule has markers, one of whose markers occurs in the
+function's head (from the first declaration line, template and return-type lines included, to the
+opening brace; comments do not count). Markers apply to C++ only, so a header can split into
+device and host functions. Anything no rule matches is in zone `-` (shown, never dropped;
+`config --check` warns when no rule is a catch-all, and when a catch-all hides the rules after it).
 
 ```toml
 [[zones]]
@@ -54,6 +58,9 @@ paths = ["**/*.py", "bindings/*.cpp"]
 [[zones]]
 name = "device"
 paths = ["src/*_kernels.hpp"]
+[[zones]]
+name = "device"          # a marked function in any other file
+markers = ["KOKKOS_INLINE_FUNCTION", "KOKKOS_FUNCTION"]
 [[zones]]
 name = "host"            # catch-all
 ```

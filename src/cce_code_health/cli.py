@@ -48,7 +48,7 @@ def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
                              cfg.profile_for(path))
            for path in files if path in texts and (only is None or path in only)}
     if cfg.zones:
-        zones.annotate(out, cfg.zones)
+        zones.annotate(out, cfg.zones, texts)
     return out
 
 

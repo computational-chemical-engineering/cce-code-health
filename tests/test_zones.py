@@ -54,7 +54,8 @@ def test_check_warns_without_catch_all():
 @pytest.mark.parametrize("entry,why", [
     ('name = ""', "name"), ('name = "-"', "name"), ("paths = ['x']", "name"),
     ('name = "a"\npaths = []', "paths"), ('name = "a"\npaths = "x"', "paths"),
-    ('name = "a"\nmarkers = ["K"]', "unknown key 'markers'"),
+    ('name = "a"\nmarkers = ["K-1"]', "markers must be"), ('name = "a"\nmarkers = []', "markers must be"),
+    ('name = "a"\ncolour = 1', "unknown key 'colour'"),
 ])
 def test_check_rejects_bad_rules(entry, why):
     _, bad = config.check(BASE + f"{K}\n{entry}\n")
@@ -184,3 +185,66 @@ def test_gate_fails_a_step_that_adds_malformed_zones(tmp_path, extra):
     rc = main(["gate", "--repo", str(repo), "--log", str(tmp_path.parent / "gate.log"), "--json", str(out), *extra])
     checks = {c["name"]: c for c in json.loads(out.read_text())["checks"]}
     assert rc == 1 and not checks["config"]["ok"] and "name must be" in checks["config"]["detail"]
+
+
+# -- markers (step 2) ---------------------------------------------------------------------------
+
+KERNEL_HPP = """\
+#pragma once
+// KOKKOS_INLINE_FUNCTION in a comment marks nothing
+inline int host_launch(int n) {
+  int s = 0;
+  for (int i = 0; i < n; ++i) { if (i % 2) { s += i; } }
+  return s;
+}
+
+template <class T>
+KOKKOS_INLINE_FUNCTION
+T device_fn(T x) {
+  if (x > 0) { return x; }
+  return -x;
+}
+
+struct Functor {
+  KOKKOS_FUNCTION void operator()(const int i) const { (void)i; }
+  void host_member() const { /* KOKKOS_FUNCTION */ }
+};
+"""
+MARKED = BASE.replace('"pkg/*"', '"pkg/*", "src/*"') + f'''[profiles]
+cpp = "cpp@0"
+{K}
+name = "user"
+paths = ["pkg/*"]
+{K}
+name = "device"
+markers = ["KOKKOS_INLINE_FUNCTION", "KOKKOS_FUNCTION"]
+{K}
+name = "host"
+'''
+
+
+def test_markers_zone_functions_not_files(tmp_path):
+    pytest.importorskip("lizard")
+    git(tmp_path, "init", "-q", "-b", "main")
+    commit(tmp_path, {".codehealth/config.toml": MARKED, "src/k.hpp": KERNEL_HPP,
+                      "pkg/m.py": "def KOKKOS_FUNCTION():\n    return 1\n"}, "base")
+    data = scan(tmp_path, tmp_path)
+    k = data["files"]["src/k.hpp"]
+    assert k["zone"] == "host"
+    zone = {f["name"].rsplit("::", 1)[-1]: f["zone"] for f in k["functions"]}
+    assert zone == {"host_launch": "host", "device_fn": "device", "operator()": "device",
+                    "host_member": "host"}, zone
+    assert data["files"]["pkg/m.py"]["functions"][0]["zone"] == "user"   # markers are C++ only
+    z = data["zones"]
+    assert z["device"]["functions"] == 2 and z["device"]["files"] == 0
+    assert z["host"]["files"] == 1 and z["host"]["functions"] == 2
+
+
+def test_marker_rules_are_not_catch_alls():
+    info, bad = config.check(BASE + f'{K}\nname = "dev"\nmarkers = ["K"]\n')
+    assert not bad and any("no catch-all" in i for i in info)
+    assert "(1 with markers, C++ only)" in info[-2]
+    rules = [{"name": "dev", "markers": ["K"]}, {"name": "rest", "paths": ["x/*"]}]
+    assert zones.file_zone(rules, "x/a.hpp") == "rest"
+    assert zones.function_zone(rules, "x/a.hpp", {"K", "int"}) == "dev"
+    assert zones.function_zone(rules, "y/a.hpp", set()) == zones.UNMATCHED

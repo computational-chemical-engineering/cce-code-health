@@ -1,17 +1,26 @@
 """Zones: debt reported per layer of a repo (design: docs/CPP1_LAYERS.md). Reporting only:
 pass/fail never depends on a zone, and without zones every output is unchanged byte for byte.
 
-The config key (config.ZONES_KEY) is an ordered array of rules, each with a `name` and optional
-`paths` (globs, config.match semantics; absent = every file). Several rules may share a name.
-A file's zone is the name of the first rule whose paths match; a file no rule matches is in
-zone "-" (shown, never dropped). A function is in its file's zone.
+The config key (config.ZONES_KEY) is an ordered array of rules, each with a `name`, optional
+`paths` (globs, config.match semantics; absent = every file) and optional `markers` (C++
+identifiers). Several rules may share a name. A file's zone is the name of the first rule without
+markers whose paths match. A function's zone is the name of the first rule whose paths match its
+file and, if the rule has markers, one of whose markers occurs in the function's head: the lines
+from the first declaration line (template and return-type lines above the name, as
+cpp_backend._head_lines finds them) to the opening brace, comments blanked. Markers apply to C++
+functions only; a Python function is matched as if it had an empty head. Anything no rule
+matches is in zone "-" (shown, never dropped).
 """
 from __future__ import annotations
 
+import re
+
 from . import config
 
+IDENT = re.compile(r"[A-Za-z_]\w*")
+
 UNMATCHED = "-"
-RULE_KEYS = {"name", "paths"}
+RULE_KEYS = {"name", "paths", "markers"}
 CATCH_ALL = {"*", "**", "**/*"}       # a paths entry that matches every file
 
 
@@ -31,11 +40,18 @@ def check_config(rules) -> tuple[list[str], list[str]]:
         paths = r.get("paths", ["*"])
         if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
             bad.append(f"{at}: paths must be a non-empty list of glob strings")
+        markers = r.get("markers", ["x"])
+        if not isinstance(markers, list) or not markers or not all(
+                isinstance(m, str) and IDENT.fullmatch(m) for m in markers):
+            bad.append(f"{at}: markers must be a non-empty list of C++ identifiers")
     if bad:
         return [], bad
     names = list(dict.fromkeys(r["name"] for r in rules))
-    info = [f"zones: {len(rules)} rule(s), zone(s) {', '.join(names)}"]
-    catch = [i for i, r in enumerate(rules) if "paths" not in r or set(r["paths"]) & CATCH_ALL]
+    marked = sum("markers" in r for r in rules)
+    info = [f"zones: {len(rules)} rule(s){f' ({marked} with markers, C++ only)' if marked else ''}, "
+            f"zone(s) {', '.join(names)}"]
+    catch = [i for i, r in enumerate(rules)
+             if "markers" not in r and ("paths" not in r or set(r["paths"]) & CATCH_ALL)]
     if catch and catch[0] < len(rules) - 1:
         info.append(f"WARNING {where}: entry {catch[0] + 1} matches every file, so the "
                     f"{len(rules) - 1 - catch[0]} rule(s) after it never apply")
@@ -45,19 +61,43 @@ def check_config(rules) -> tuple[list[str], list[str]]:
     return info, []
 
 
-def file_zone(rules: list[dict], path: str) -> str:
+def function_zone(rules: list[dict], path: str, head: set[str]) -> str:
+    """Zone of a function of `path` whose head holds the identifiers `head`."""
     for r in rules:
-        if any(config.match(path, p) for p in r.get("paths", ["*"])):
+        if (any(config.match(path, p) for p in r.get("paths", ["*"]))
+                and ("markers" not in r or head & set(r["markers"]))):
             return r["name"]
     return UNMATCHED
 
 
-def annotate(reports: dict[str, dict], rules: list[dict]) -> None:
-    """Add `zone` to every file record and every function record of `reports` (in place)."""
+def file_zone(rules: list[dict], path: str) -> str:
+    """Zone of the file itself: rules with markers never match a file."""
+    return function_zone([r for r in rules if "markers" not in r], path, set())
+
+
+def head_identifiers(lines: list[str], line: int, end: int) -> set[str]:
+    """Identifiers in a C++ function's head (`lines`: the source with comments blanked)."""
+    from .cpp_backend import _head_lines  # noqa: PLC0415 (C++ only)
+    first, brace = _head_lines(lines, line, end)
+    head = lines[first - 1:brace]
+    if head:
+        head[-1] = head[-1].split("{", 1)[0]
+    return set(IDENT.findall("\n".join(head)))
+
+
+def annotate(reports: dict[str, dict], rules: list[dict], texts: dict[str, str]) -> None:
+    """Add `zone` to every file record and every function record of `reports` (in place).
+    `texts`: the sources by path, read only for C++ files when some rule has markers."""
+    marked = any("markers" in r for r in rules)
     for path, r in reports.items():
         r["zone"] = file_zone(rules, path)
+        lines = None
+        if marked and path in texts and config.EXTENSIONS.get(path[path.rfind("."):]) == "cpp":
+            from .cpp_backend import blank_comments  # noqa: PLC0415 (C++ only)
+            lines = blank_comments(texts[path]).splitlines()
         for f in r["functions"]:
-            f["zone"] = r["zone"]
+            head = head_identifiers(lines, f["line"], f["end_line"]) if lines is not None else set()
+            f["zone"] = function_zone(rules, path, head) if marked else r["zone"]
 
 
 def _names(rules: list[dict], reports: dict[str, dict]) -> list[str]:
