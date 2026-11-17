@@ -153,3 +153,42 @@ def test_metric_only_for_benchmarks(repo, capsys):
     commit(repo, {".codehealth/config.toml": bad})
     assert main(["config", "--check", "--repo", str(repo)]) != 0
     assert "metric is for benchmark tiers" in capsys.readouterr().out
+
+
+NUMBA_PROBE = """import os, sys
+d = os.environ.get("NUMBA_CACHE_DIR")
+if not d or os.path.exists(os.path.join(d, "m")):
+    sys.exit(3)
+os.makedirs(d, exist_ok=True)
+open(os.path.join(d, "m"), "w").close()
+import time
+time.sleep(0.2)
+"""
+CACHE_WRITER = """import os, sys
+sys.path.insert(0, os.getcwd())
+import pkg.mod
+os.makedirs("pkg/__pycache__", exist_ok=True)
+open("pkg/__pycache__/mod.calc.nbi", "w").close()
+import time
+time.sleep(pkg.mod.DELAY)
+"""
+
+
+def bench_script(repo, name, body):
+    commit(repo, {f"tools/{name}": body})
+    set_config(repo, CONFIG.replace('-c "import pkg.mod as m, time; time.sleep(m.DELAY)"', f"tools/{name}"))
+
+
+def test_numba_cache_dir_is_fresh_per_run(repo):
+    # numba @njit(cache=True) writes into the source's __pycache__ unless NUMBA_CACHE_DIR is set;
+    # each benchmark run must get its own empty one (pymrm-health report 2026-11-17)
+    bench_script(repo, "probe.py", NUMBA_PROBE)
+    assert gate(repo, "refactor") == 0
+
+
+def test_warmup_writing_ignored_cache_is_noted(repo, capsys):
+    bench_script(repo, "writer.py", CACHE_WRITER)
+    assert gate(repo, "refactor") == 0
+    out = capsys.readouterr().out
+    assert "warm-up wrote ignored files into the tree" in out
+    assert "pkg/__pycache__/mod.calc.nbi" in out and ".pyc" not in out

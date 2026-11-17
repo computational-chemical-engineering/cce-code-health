@@ -79,7 +79,8 @@ command's interpreter.
 
 Benchmarks are never cached (timing must stay paired): one untimed warm-up per side, then ABBA
 rounds, ref-base tree against head; speedup is the median of the paired ratios base_i / head_i;
-each run gets a fresh TMPDIR and XDG_CACHE_HOME and may not write into the tree. Refactor mode
+each run gets a fresh TMPDIR, XDG_CACHE_HOME and NUMBA_CACHE_DIR and may not write into the tree
+(gitignored files a warm-up writes, bytecode aside, are named in a note: a cache there survives). Refactor mode
 (and non-primary tiers): median >= 1 / (1 + max_slowdown). Optimize mode, primary tier: accepted
 when `speedup_lower_bound` (distribution-free one-sided 95 % lower bound of the median, from
 order statistics: the k-th smallest ratio for the largest k with P(Binomial(n, 0.5) <= k-1) <=
@@ -1040,15 +1041,25 @@ def _status(cwd: Path) -> bytes:
     return gitio.git(cwd, "status", "--porcelain", "-uall")
 
 
+def _ignored(cwd: Path) -> set[str]:
+    """Gitignored files in the tree, without Python bytecode (the interpreter's own cache, the
+    same on both sides after the warm-up)."""
+    out = gitio.git(cwd, "status", "--porcelain", "--ignored", "-uall").decode()
+    return {ln[3:] for ln in out.splitlines()
+            if ln.startswith("!! ") and not ln.endswith((".pyc", ".pyo"))}
+
+
 def _bench_run(t, cwd, base, files, env, log) -> tuple[int, float, float, str]:
-    """One run with fresh TMPDIR and XDG_CACHE_HOME: (rc, seconds, children CPU s, note)."""
+    """One run with fresh TMPDIR, XDG_CACHE_HOME and NUMBA_CACHE_DIR (numba's cache=True would
+    otherwise write next to the source): (rc, seconds, children CPU s, note)."""
     tmp, cache = tempfile.mkdtemp(prefix="codehealth-tmp-"), tempfile.mkdtemp(prefix="codehealth-cache-")
     try:
         before = _status(cwd)
         r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
         rc, sec, _ = _run_checked(t, _fill(t["cmd"], repo=str(cwd), base=base, ref_base=base, files=files,
                                            out=""), cwd,
-                                  {**env, "TMPDIR": tmp, "XDG_CACHE_HOME": cache}, log, t.get("timeout"))
+                                  {**env, "TMPDIR": tmp, "XDG_CACHE_HOME": cache,
+                                   "NUMBA_CACHE_DIR": os.path.join(cache, "numba")}, log, t.get("timeout"))
         r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu = (r1.ru_utime + r1.ru_stime) - (r0.ru_utime + r0.ru_stime)
         note = "benchmark wrote into the tree" if _status(cwd) != before else ""
@@ -1088,6 +1099,25 @@ def _bench_detail(ratios, times, cpu, extra="", label="") -> str:
             f"children cpu base {sum(cpu['base']):.3g} s, head {sum(cpu['head']):.3g} s)")
 
 
+def _warm_up(t, sides: dict, args: dict) -> tuple[str, str]:
+    """One untimed run per side: (error, note). The note names gitignored files the warm-up
+    wrote into a tree: a cache there survives between runs, so the timed runs may be warm
+    (pymrm-health 2026-11-17: numba cache=True writes next to the source)."""
+    warm = []
+    for side, cwd in sides.items():
+        before = _ignored(cwd)
+        rc, _, _, _ = _bench_run(t, cwd, args["base"], args["files"], args["env"], args["log"])
+        if rc != 0:
+            return f"exit {rc} at {side} (warm-up)", ""
+        new = sorted(_ignored(cwd) - before)
+        if new:
+            warm.append(f"{side}: " + ", ".join(new[:3]) + (f" (+{len(new) - 3} more)" if len(new) > 3 else ""))
+    if not warm:
+        return "", ""
+    return "", "; note: warm-up wrote ignored files into the tree, a cache there makes timed runs warm (" \
+        + "; ".join(warm) + ")"
+
+
 def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
     """Warm-up, then ABBA-ordered paired runs (base is the ref-base tree); speedup is the median
     of base_i / head_i. Primary tier in optimize mode: accepted when the lower confidence bound
@@ -1096,10 +1126,9 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
     repeat = int(t.get("repeat", 5))
     sides = {"base": get_tree(), "head": ctx.repo}
     args = dict(base=ctx.ref_base, files=ctx.files, env=ctx.env, log=ctx.log)
-    for side, cwd in sides.items():
-        rc, _, _, _ = _bench_run(t, cwd, args["base"], args["files"], args["env"], args["log"])
-        if rc != 0:
-            return False, f"exit {rc} at {side} (warm-up)"
+    err, warm_note = _warm_up(t, sides, args)
+    if err:
+        return False, err
     times, cpu = {"base": [], "head": []}, {"base": [], "head": []}
     metric = t.get("metric", "wall")
 
@@ -1150,12 +1179,13 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
             extra = (f", lower bound {bound:.3f} at 95%" + (" (n too small)" if insufficient else "")
                      + (f", extended from {repeat} to {len(rs[m])} rounds" if extended else ""))
             parts.append(detail(m, rs[m], extra))
-        return passed, "; ".join(parts) + f", need >= {need}" + (" (both)" if metric == "both" else "")
+        return passed, ("; ".join(parts) + f", need >= {need}" + (" (both)" if metric == "both" else "")
+                        + warm_note)
     allowed = float(t.get("max_slowdown", 0.03))
     oks = {m: statistics.median(ratios(m)) >= 1 / (1 + allowed) for m in used}
     return (any(oks.values()),
             "; ".join(detail(m, ratios(m)) for m in used) + f", max slowdown {allowed:.0%}"
-            + (" (fails only if both slow down)" if metric == "both" else ""))
+            + (" (fails only if both slow down)" if metric == "both" else "") + warm_note)
 
 
 # -- build-tool tiers (C++): skip_exit, fail_regex, findings, convergence ---------------------

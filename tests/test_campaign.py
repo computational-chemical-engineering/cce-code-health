@@ -123,6 +123,7 @@ def fake_bench(monkeypatch, head_times):
     def fake(t, cwd, base, files, env, log):
         return 0, (1.0 if cwd == Path("BASE") else heads.pop(0)), 0.0, ""
     monkeypatch.setattr(gatemod, "_bench_run", fake)
+    monkeypatch.setattr(gatemod, "_ignored", lambda cwd: set())
     ctx = SimpleNamespace(repo=Path("HEAD"), ref_base="x", files="", env={}, log=io.StringIO(),
                           mode="optimize")
     return ctx, lambda: Path("BASE")
