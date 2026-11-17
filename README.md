@@ -593,6 +593,9 @@ in refactor mode, except:
   each), and each entry must hold in its own file (that file's count of the literal moved by at
   least `count` in that direction). The check reports "as planned: ..." and gate meta `plan`
   carries the entries. Without them the rule is refactor's: no literal added or removed.
+  The count is over the touched files together, so list only the net change: a literal that
+  moves (to another scope, function or touched file) is unchanged and must not be listed, while
+  one that disappears (say, from a dropped field default `float("nan")`) must be, once per copy.
 - `plan`: added in-scope files match `new_files`; touched paths outside the scope or under
   `forbid` must match `callers`. Frozen paths and `.codehealth/` stay refused.
 - `retargeted`: the name leaves the old module (a dropped re-export, no shim) while its home

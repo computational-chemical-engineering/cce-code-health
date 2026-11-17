@@ -100,3 +100,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-17 pymrm-health pinned ffc4a30, G3 confirmed, c2 started (CB2 d7c4650); README: profile/[profiles] must agree
 2026-11-18 pymrm c2 S1-S5 on python@1 passed with no tool fix (_NewtonRun 54->11); v0.4.0 card B condition met, card unsigned
 2026-11-18 v0.4.0 tagged at 6f5bc28 (python@1 frozen); Desk cce-v040-release B VERIFIED, executed
+2026-11-18 pymrm c2 S6 interface mode with literals_removed-only plan passed first time (S7, S8 too; package debt 358.5 -> 311.3); README: literal multiset is net over touched files

@@ -46,8 +46,8 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 ## Open requests
 
 - python@1 campaign CLOSED: v0.4.0 tagged 6f5bc28 (Desk cce-v040-release B VERIFIED, executed).
-  pymrm c2 runs on it (pinned ffc4a30, same code). Reports from c2 (next: S6 interface mode with a
-  literals_removed-only plan) are ordinary reactive work; any scoring change needs python@2.
+  pymrm c2 runs on it (pinned ffc4a30, same code). S6 interface (literals_removed-only) passed, S7, S8 too;
+  package debt 358.5 -> 311.3. Reports are ordinary reactive work; any scoring change needs python@2.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
