@@ -81,6 +81,16 @@ with `#ifndef A`), the brace guard limits the damage; captures misread `x * y(` 
 miss members reached through an implicit this. Risk: captures charge a lambda while an equivalent
 functor's members are free (incentive to convert lambdas to functors).
 
+Rule (1) as shipped (src/cce_code_health/cpp_view.py, 2026-11-17; Peclet nine repos: cpp@0 10899.5 / 89
+brains, cpp@1 10609.7 / 84): a literal condition must be the whole condition after comments are
+removed (`#if 0 || defined(X)` is live); `#elif 1` and `#if true` make the later branches dead;
+`#elifdef`/`#elifndef` act as `#elif`; the `if` of `if constexpr` is not a decision when branches are
+compared; a runtime `else if constexpr` nests as an else-if. Limits found in review (think): a
+block comment that starts on a group directive and runs over lines leaks its tail into the view;
+a dangling else after a braceless `if constexpr` body is read as flat; duplication and zone markers
+still read the raw source. Open (design choice, unchanged): the brace guard falls back to the first
+live branch; taking the best branch among those whose balance equals the first's would be better.
+
 ## Falsifiers (docs/cpp1/f1.cpp; expected numbers)
 
 - F1 if-constexpr chain with `?`: CCN 4 -> 2; nesting cpp@0 2, cpp@1 0.

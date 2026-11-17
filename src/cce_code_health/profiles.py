@@ -6,10 +6,13 @@ against CodeScene on files a refactor campaign does not touch.
 cpp@0 (C++, experimental) is uncalibrated too: thresholds and weights by analogy with
 python@0, with cyclomatic complexity (lizard's CCN) in place of cognitive complexity. A
 brain function there has CCN > 25 and NLOC > 70.
+
+cpp@1 (in development, not frozen) keeps cpp@0's numbers and changes what is measured
+(cpp_rules; docs/CPP1_LAYERS.md).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # Function metrics that carry debt, in report order (Python; each profile names its own).
 METRICS = ("cognitive", "nloc", "nesting", "bumps", "params", "boolops")
@@ -38,6 +41,9 @@ class Profile:
     # nloc carries no debt and does not make them brain functions. Matched on the last
     # component of the qualified name.
     table_functions: frozenset = frozenset()
+    # C++ measurement rules beyond cpp@0 (docs/CPP1_LAYERS.md): "preprocess" measures one
+    # branch per #if group and does not count `if constexpr` as a decision or a level.
+    cpp_rules: frozenset = frozenset()
 
 
 PROFILES = {
@@ -54,6 +60,11 @@ PROFILES = {
         table_functions=frozenset({"NB_MODULE", "PYBIND11_MODULE", "BOOST_PYTHON_MODULE"}),
     ),
 }
+# In development, not frozen: rules are added one by one (docs/CPP1_LAYERS.md) and the
+# profile is released only after a Peclet run. Thresholds and weights of cpp@0 so far.
+_CPP0 = PROFILES["cpp@0"]
+PROFILES["cpp@1"] = replace(_CPP0, name="cpp@1", thresholds=dict(_CPP0.thresholds),
+                            weights=dict(_CPP0.weights), cpp_rules=frozenset({"preprocess"}))
 
 
 def get(name: str) -> Profile:

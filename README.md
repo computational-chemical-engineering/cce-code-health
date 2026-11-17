@@ -158,6 +158,17 @@ do, switch and try open a level, braced or not; `else if`, else and catch do not
 use `// codehealth: allow ccn,nesting -- reason` on the line above the declaration (above its
 `template` line, if any) or on the lines up to its opening brace, and `allow-file`.
 
+Profile `cpp@1` is in development (not frozen; released only after a Peclet run; design in
+docs/CPP1_LAYERS.md). It has the thresholds and weights of `cpp@0` and measures a preprocessed
+view of each file. Rule (1), in place: of every `#if`/`#ifdef`/`#ifndef` group one branch is
+measured (`#if 0`, `#if false` and `#elif 0` are dead; after `#if 1` the later branches are dead;
+of the live branches the one with the most decisions, ties to the first, unless its brace balance
+differs from the first live branch's), so code under `#ifdef`/`#else` no longer counts twice and
+unbalanced braces across branches no longer make lizard drop the functions that follow.
+`if constexpr` is not a decision, and `if constexpr`, `else if constexpr` and their else open no
+nesting level. Lines and suppressions refer to the source as written. Rules still to come: loop
+credit, kernel lambdas scored as functions, captures.
+
 `scan`, `diff`, `hotspots` and the gate's debt check cover C++ files. The gate's static rules
 `literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static
 rules (public headers, literals) are not implemented yet, and C++ files are skipped there.

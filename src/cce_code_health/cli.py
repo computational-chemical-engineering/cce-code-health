@@ -62,7 +62,7 @@ def new_errors(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[str]:
 def _analyze(path: str, text: str, p):
     if p.language == "cpp":
         from .cpp_backend import analyze as analyze_cpp  # noqa: PLC0415 (needs lizard)
-        return analyze_cpp(path, text)
+        return analyze_cpp(path, text, p)
     return analyze(path, text, p.varargs_params)
 
 
