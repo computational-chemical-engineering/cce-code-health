@@ -58,15 +58,33 @@ def _outer_functions(tree: ast.AST):
 
 
 def _blocks(tree: ast.Module):
-    """Every statement list inside a function, the function bodies included."""
+    """Every statement list inside a function, the function bodies included (statement lists
+    occur only in statements, handlers and match cases, so expressions are not visited)."""
+    def lists(s):
+        for f in ("body", "orelse", "finalbody"):
+            b = getattr(s, f, None)
+            if isinstance(b, list) and b and isinstance(b[0], ast.stmt):
+                yield b
+        for h in getattr(s, "handlers", None) or []:
+            yield h.body
+        for c in getattr(s, "cases", None) or []:
+            yield c.body
+
+    def walk(s):
+        for b in lists(s):
+            yield b
+            for x in b:
+                yield from walk(x)
     for fn in _outer_functions(tree):
-        for n in ast.walk(fn):
-            for f in ("body", "orelse", "finalbody"):
-                b = getattr(n, f, None)
-                if isinstance(b, list) and b and isinstance(b[0], ast.stmt):
-                    yield b
-            for h in getattr(n, "handlers", None) or []:
-                yield h.body
+        yield from walk(fn)
+
+
+def _size(s: ast.stmt, sizes: dict) -> int:
+    """AST nodes in s (all of them, as ast.walk counts), memoised by id."""
+    n = sizes.get(id(s))
+    if n is None:
+        n = sizes[id(s)] = sum(1 for _ in ast.walk(s))
+    return n
 
 
 def _is_doc(s: ast.stmt) -> bool:
@@ -77,6 +95,7 @@ def clone_groups(tree: ast.Module, window: int = 3, min_nodes: int = 30) -> list
     """Clone groups: each a list of >= 2 non-overlapping occurrences (statement lists), in
     source order."""
     memo: dict = {}
+    sizes: dict = {}
     seen: dict = defaultdict(dict)        # key hash -> {(first line, last line): statements}
     for b in _blocks(tree):
         b = [s for s in b if not _is_doc(s)]
@@ -84,7 +103,7 @@ def clone_groups(tree: ast.Module, window: int = 3, min_nodes: int = 30) -> list
             w = b[i:i + window]
             if not any(isinstance(x, COMPOUND) for x in w):
                 continue
-            if sum(1 for s in w for _ in ast.walk(s)) < min_nodes:
+            if sum(_size(s, sizes) for s in w) < min_nodes:
                 continue
             h = hashlib.blake2b("|".join(_key(s, memo) for s in w).encode(), digest_size=10).digest()
             seen[h].setdefault((w[0].lineno, w[-1].end_lineno), w)

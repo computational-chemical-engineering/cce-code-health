@@ -258,8 +258,10 @@ def analyze(path: str, source: str, varargs_weight: int = 3, rules: frozenset = 
             name=name, line=node.lineno, end=node.end_lineno,
             nloc=sum(1 for i in span if i in lines),
             cognitive=cog.get(start, cog.get(node.lineno, 0)),
-            nesting=nesting_depth(node), bumps=bumps(node),
-            params=params(node, varargs_weight), boolops=boolops(node),
+            nesting=nesting_depth(node),
+            bumps=bumps_runs(node) if "bump_runs" in rules else bumps(node),
+            params=params(node, varargs_weight),
+            boolops=boolops_conditions(node) if "cond_boolops" in rules else boolops(node),
             allows=fn_allows))
     classes = cohesion.classes(tree)
     if rules:
@@ -268,21 +270,17 @@ def analyze(path: str, source: str, varargs_weight: int = 3, rules: frozenset = 
 
 
 def _py1(tree, funcs, classes, rules, clone_window, clone_min_nodes) -> None:
-    """Apply the python@1 rules to the units (in units() order) and the class records."""
+    """Class state, clones and `public` for the units (in units() order) and the class records."""
     nodes = [node for _, node in units(tree)]
     writes: dict[int, int] = {}
     if "state" in rules:
-        for rec, (_, cls, chan) in zip(classes, classstate.classes(tree)):
-            writes.update({id(m): n for m, n in classstate.method_state_writes(cls, chan).items()})
+        for rec, (_, chan, per_method) in zip(classes, classstate.classes(tree)):
+            writes.update({id(m): n for m, n in per_method.items()})
             rec["state_writes"] = classstate.class_state_writes(chan)
             rec["channels"] = chan
     marked = (pyclones.marked_statements(tree, clone_window, clone_min_nodes)
               if "clones" in rules else set())
     for fm, node in zip(funcs, nodes):
-        if "bump_runs" in rules:
-            fm.bumps = bumps_runs(node)
-        if "cond_boolops" in rules:
-            fm.boolops = boolops_conditions(node)
         if "state" in rules:
             fm.state_writes = writes.get(id(node), 0)
         if "clones" in rules:

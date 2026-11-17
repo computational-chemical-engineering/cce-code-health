@@ -128,17 +128,20 @@ def constructors(cls: ast.ClassDef) -> set[str]:
 
 def _counted(cls: ast.ClassDef) -> list:
     """Methods outside K and X, with a first parameter."""
+    methods = _methods(cls)
+    if not methods:
+        return []
     ctor = constructors(cls)
-    return [m for m in _methods(cls)
+    return [m for m in methods
             if m.name not in ctor and not _excluded(m) and _self_name(m)]
 
 
-def channels(cls: ast.ClassDef) -> dict[str, list[str]]:
+def channels(cls: ast.ClassDef, counted: list | None = None) -> dict[str, list[str]]:
     """{channel key: sorted names of the methods that write it}."""
     names = {m.name for m in _methods(cls)}
     W: dict[str, set[str]] = {}
     R: dict[str, set[str]] = {}
-    for m in _counted(cls):
+    for m in _counted(cls) if counted is None else counted:
         w, r = writes_reads(m, _self_name(m))
         for a in w:
             if a not in names:
@@ -149,28 +152,30 @@ def channels(cls: ast.ClassDef) -> dict[str, list[str]]:
             if (R.get(a, set()) - ws) or len(ws) >= 2}
 
 
-def method_state_writes(cls: ast.ClassDef, chan: dict | None = None) -> dict:
+def method_state_writes(cls: ast.ClassDef, chan: dict | None = None,
+                        counted: list | None = None) -> dict:
     """{method node: number of channels it writes} for every def directly in cls (0 for K and X)."""
-    chan = channels(cls) if chan is None else chan
-    counted = {id(m) for m in _counted(cls)}
-    out = {}
-    for m in _methods(cls):
-        out[m] = (sum(1 for ws in chan.values() if m.name in ws) if id(m) in counted else 0)
-    return out
+    counted = _counted(cls) if counted is None else counted
+    chan = channels(cls, counted) if chan is None else chan
+    ids = {id(m) for m in counted}
+    return {m: (sum(1 for ws in chan.values() if m.name in ws) if id(m) in ids else 0)
+            for m in _methods(cls)}
 
 
 def class_state_writes(chan: dict) -> int:
     return sum(len(ws) for ws in chan.values())
 
 
-def classes(tree: ast.Module) -> list[tuple[str, ast.ClassDef, dict]]:
-    """[(qualname, class node, channels)] in the order of cohesion.classes."""
+def classes(tree: ast.Module) -> list[tuple[str, dict, dict]]:
+    """[(qualname, channels, {method node: state_writes})] in the order of cohesion.classes."""
     out = []
 
     def walk(body, prefix):
         for node in body:
             if isinstance(node, ast.ClassDef):
-                out.append((prefix + node.name, node, channels(node)))
+                counted = _counted(node)
+                chan = channels(node, counted)
+                out.append((prefix + node.name, chan, method_state_writes(node, chan, counted)))
                 walk(node.body, prefix + node.name + ".")
     walk(tree.body, "")
     return out
