@@ -70,7 +70,13 @@ as a file/class smell the gate checks).
   655baaf _Reconstructor 14; 6e3c8fc +1). Known weakness: de4fcf8 (_Continuation 5, rated very good)
   and c167027 (_PseudoTransient 4) also fail: lifting closures with nonlocal state into a class makes
   invisible state visible. Script scratchpad g11/replay.py.
-- G4' running (blind think review, 20 classes, key in scratchpad g4/key.json). think diff review running.
+- G4' PASS on the literal criterion, weak on a strict one. Blind think review of 20 classes (key in
+  scratchpad g4/key.json). Flagged 6: _NewtonRun high, _Planner high, Fluid medium, _Linear1D low,
+  _ThetaTVD low, _Reconstructor none (builder accumulating its result). That is 5/6 rated a cost
+  (severity >= low), but only 3/6 at >= medium. Unflagged 14: 0 high (pass <= 3), 2 medium
+  (IBMCoupled3DSMRModel, Monolith), 2 "no". The two highs are the top two flagged. Known false-positive
+  pattern: accumulators/builders (_Reconstructor 14, EFHolder 8).
+- think diff review running (with the closure-state question added).
 
 ## Open decisions (default in force until changed)
 
