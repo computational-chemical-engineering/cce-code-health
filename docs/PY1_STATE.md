@@ -57,6 +57,21 @@ python@1 selectable via `[profiles] python = "python@1"` on a new campaign base,
 refactor mode scoring python@1 debt AND the class-state smell (so it must reach the gate as debt or
 as a file/class smell the gate checks).
 
+## Gate results (orchestrator, 2026-11-17, py1 at aa2f95e)
+
+- Implementer (Opus): G0 PASS (8/8 byte-identical; my spot-check on pymrm 230bbc3..13176bb diff also
+  identical), suite 540 PASS, G5 G8 PASS, G6 PASS 1105 / sum 383, G7 PASS 122, G9 PASS (42 files),
+  G10 PASS 0 diffs, G12 PASS 1.19.
+- G1 PASS: OFS rho(-debt) tests 0.84, scripts 0.95, docs 0.95, benchmarks 0.93, src 0.94 (all >= py0).
+- G2 PASS: pymrm src (14 scored) rho(-debt) 0.75 -> 0.91 (CodeScene 8475071 = pymrm 230bbc3; same at 13176bb).
+- G3 PASS: solve.py @13176bb class_state on _NewtonRun (54), health 4.5 (<= 8.0; below CodeScene 4.70
+  and the blind 6.5: python@1 is harsher than both on this file).
+- G11 PASS: 92 c1 steps, 7 fail the ratchet (65ee7c9, 1298ad2, bc09685 build _NewtonRun 0->54;
+  655baaf _Reconstructor 14; 6e3c8fc +1). Known weakness: de4fcf8 (_Continuation 5, rated very good)
+  and c167027 (_PseudoTransient 4) also fail: lifting closures with nonlocal state into a class makes
+  invisible state visible. Script scratchpad g11/replay.py.
+- G4' running (blind think review, 20 classes, key in scratchpad g4/key.json). think diff review running.
+
 ## Open decisions (default in force until changed)
 
 - Allow-comment loophole (found by think): the gate does not refuse new `# codehealth: allow` comments
