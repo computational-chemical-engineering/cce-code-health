@@ -65,7 +65,8 @@ campaign is one of its work packages and follows those rules.
 6. **Gate.** `codehealth gate --mode refactor --base <last accepted commit>
    --ref-base <campaign base> --require-gain --json <gate.json>`.
    It checks scope, frozen and forbidden paths, literals, public API, debt (must go down
-   with `--require-gain`), then the repo's tiers (tests, identity, references bitwise,
+   with `--require-gain`; under profile python@1 also no rise in class state, so helpers
+   that communicate through new `self` fields fail), then the repo's tiers (tests, identity, references bitwise,
    benchmark no slowdown). Exit 0 means accept; the summary line shows `debt=a->b`.
    Otherwise drop the step: `git reset --hard <last accepted commit>`.
 7. **Log** every attempt, right after the gate (before any reset): `codehealth log
@@ -124,8 +125,11 @@ duplication still fails.
 A fresh-context reviewer (the repo's review lane, or an agent that sees only the diffs)
 answers per step: is the code easier to read and change? Reject and revert steps that
 lower debt by fragmenting logic into meaningless pieces, by moving complexity into a
-helper with the same complexity, by bundling unrelated parameters, or by hiding branches
-in data structures nobody can read, and the anti-patterns listed in the seed playbook.
+helper with the same complexity, by bundling unrelated parameters, by extracting methods
+that communicate through new mutable fields (also through a local alias or a mutating call
+such as `self.items.append`, which the python@1 class-state measure does not see), or by
+hiding branches in data structures nobody can read, and the anti-patterns listed in the seed
+playbook.
 
 A rejected step is undone by an exact revert, gated like a step but allowed to raise debt:
 `git revert --no-edit <sha>...` (one commit for all rejected steps of the review, or one
