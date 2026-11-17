@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-16)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at 8b03640, 495 tests.
+- Tagged v0.2.0 (plugin 0.2.0). main at 534fa62, 508 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -24,45 +24,33 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved the request in that
-session; cpp@0 stays frozen and stays Peclet's gate). Design DONE: docs/CPP1_LAYERS.md (think,
-Opus xhigh, with prototype docs/cpp1/proto.py and falsifiers docs/cpp1/f1.cpp); decision row
-2026-11-17 in docs/DECISIONS.md. Step 1 DONE (1bed7b9, paths) and step 2 DONE (317db57, markers:
-src/cce_code_health/zones.py, tests/test_zones.py). cpp@1 rule (1) DONE (bee116e: cpp_view.py,
-profile cpp@1 with cpp_rules={"preprocess"}, nesting via _NestingScan in cpp_backend.py; Peclet
-cpp@1 10609.7 / 84), rule (2) DONE (5110771: loop credit, _NestingScan.level; cpp@1 10162.7 / 84)
-and rule (3) DONE (8b03640: kernel lambdas, src/cce_code_health/cpp_kernels.py, `_split` in
-cpp_backend.py; cpp@1 9163.7 / 62; "Rule (3) as shipped" in docs/CPP1_LAYERS.md lists the review notes
-left open: brain match by bare name, --target ambiguity, lambda#k renumbering).
-cpp@1 trial config: /tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml
-(base.toml with cpp@1; rebuild by sed if gone). Byte-identity script (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files; arg OUTDIR;
-needs PATH=.venv/bin): /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh,
-reference outputs in its before/; Peclet clones: /tmp/claude-1000/-home-eajfpeters-Code/6acb3080-ac42-4dda-bdfb-676e2b649813/scratchpad/peclet
-(zones trial config zm.toml beside ident.sh). Rebuild if gone.
-Peclet zones trial config (user globs > device K-only headers > device KOKKOS markers > host):
-README example plus docs/briefs/cpp1-layers-design.md addendum (dem has no K-only header).
-Next: cpp@1 rule (4) captures (new metric `captures`, lambdas only, >8 w0.5; docs/CPP1_LAYERS.md
-rule (4) and F6 in docs/cpp1/f1.cpp; prototype `declared` and the captures block in
-docs/cpp1/proto.py analyze). Falsifier first. Lambda records come from cpp_kernels.lambdas; the
-enclosing function's params and earlier locals are needed (prototype: names = enclosing params |
-declared(ct, enclosing start, intro)). Adding a metric to cpp@1 only: CPP_METRICS is shared with
-cpp@0, so give cpp@1 its own metrics tuple and keep cpp@0 output byte-identical (ident.sh).
-Conservation check script: /tmp/claude-1000/-home-eajfpeters-Code/54215b1c-269c-47f3-8708-9fa8bc19bd46/scratchpad/conserve.py PECLET_DIR.
-Later: gate `zones` as data (debt_check out-param) for
-zone_ratchet/log; hide unchanged zone rows in diff text.
-Config key name `[[zones]]` is a DEFAULT: DECISION-REQUEST sent to hub (2026-11-17); keep the key
-in one place in config.py so a rename is one edit. Calibration data: shallow clones of the nine
-Peclet repos in the session scratchpad (.../scratchpad/peclet/peclet-<name>; if gone, re-clone
-with `gh repo clone computational-chemical-engineering/peclet-<name> -- --depth 1`); cpp@0
-baseline with scratchpad/peclet/base.toml: debt 10899.5, brain 89 (core 798.2, geom 22.0,
-amr 1064.0, morton 11.0, flow 5614.9, pnm 319.3, dem 1485.8, voro 1438.9, coupling 145.4).
-Peclet's suite-scan scope and layer globs: addendum of docs/briefs/cpp1-layers-design.md.
+Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved it in that session;
+cpp@0 stays frozen and stays Peclet's gate). Design: docs/CPP1_LAYERS.md; decision rows 2026-11-17
+in docs/DECISIONS.md. ALL FOUR cpp@1 RULES SHIPPED: paths 1bed7b9, markers 317db57, rule (1)
+bee116e, (2) 5110771, (3) 8b03640, (4) captures 534fa62 (think-reviewed; capture count alone >8 w0.5,
+not params+captures; display smell many_captures; profile field kernel_this_macros). Peclet nine
+clones cpp@1 9678.2 / 62 brains (captures debt 514.5; median 4, p90 11, max 28).
+Next: wait for peclet-health's own nine-repo cpp@1 trial table; then release cpp@1 (freeze; a tag
+or release needs the user's go or a VERIFIED Desk card). Meanwhile, optional (not started): gate
+`zones` as data (debt_check out-param) for zone_ratchet/log; hide unchanged zone rows in diff text;
+rule (3) open notes (brain match by bare name, --target ambiguity, lambda#k renumbering).
+Scratch tools (rebuild if gone): cpp@1 trial config
+/tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml (base.toml with cpp@1);
+byte-identity script /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh OUTDIR
+(needs PATH=.venv/bin; reference in its before/); Peclet clones
+/tmp/claude-1000/-home-eajfpeters-Code/6acb3080-ac42-4dda-bdfb-676e2b649813/scratchpad/peclet (re-clone with
+`gh repo clone computational-chemical-engineering/peclet-<name> -- --depth 1`; cpp@0 baseline base.toml: debt 10899.5,
+brain 89); conservation /tmp/claude-1000/-home-eajfpeters-Code/54215b1c-269c-47f3-8708-9fa8bc19bd46/scratchpad/conserve.py PECLET_DIR;
+capture stats /tmp/claude-1000/-home-eajfpeters-Code/04d9439e-3ffc-4be1-b736-2e124d39fd21/scratchpad/capstats.py SCANDIR PECLET_DIR.
+Run pytest as `.venv/bin/python -m pytest` (a PATH= prefix breaks 49 tier tests: exit 127).
+Config key name `[[zones]]` is a DEFAULT pending the user (see Open requests); key in one place in config.py.
 
 ## Open requests
 
 - peclet-health: cpp@1 + zones; pins 1bed7b9 (paths) and 317db57 (markers, with nine-repo zone
-  table) sent 2026-11-17; bee116e (cpp@1 rule 1), 5110771 (rule 2) and 8b03640 (rule 3; bridge delivery unconfirmed) sent 2026-11-17. It trials at its next round boundary (WO-28 on dem running) and sends
-  its own nine-repo table. Send a pin per cpp@1 rule.
+  table) sent 2026-11-17; bee116e (cpp@1 rule 1), 5110771 (rule 2) and 8b03640 (rule 3) and 534fa62 (rule 4, last rule) sent 2026-11-17 (bridge delivery unconfirmed).
+  It trials at its next round boundary (WO-28 on dem running) and sends its own nine-repo table,
+  which decides the cpp@1 release.
 - User (via hub): public name of the zones config key (default `[[zones]]`). Desk card
   `decisions/cce-zones-name` (hub agrees with A); act only on a VERIFIED sign-off. Asked hub to
   extend the card to the output keys: card v3 options A keep zones/zone/zones, B layers/layer/layers,
