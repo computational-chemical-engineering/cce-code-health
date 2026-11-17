@@ -20,7 +20,7 @@ See [docs/DESIGN.md](docs/DESIGN.md). License: MIT.
 ## Usage (0.2)
 
 ```bash
-pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.3.0
+pip install git+https://github.com/computational-chemical-engineering/cce-code-health@v0.4.0
 codehealth scan                      # score in-scope files in the working tree
 codehealth diff --base origin/main   # ratchet: fail (exit 1) if the change adds debt
 codehealth hotspots --top 20         # rank files by commits x debt (follows renames)
@@ -108,7 +108,7 @@ File-level smells use `allow-file`.
 
 ### Profile python@1
 
-Opt in with `[profiles] python = "python@1"` (or `profile = "python@1"`); `python@0` stays the
+python@1 is frozen in v0.4.0. Opt in with `[profiles] python = "python@1"` (or `profile = "python@1"`); `python@0` stays the
 default and its output is unchanged. A config that sets both keys must set both to `python@1`:
 a top-level `profile = "python@0"` next to `[profiles] python = "python@1"` is refused as a
 disagreement. Design and calibration: `docs/py1/design.md`.

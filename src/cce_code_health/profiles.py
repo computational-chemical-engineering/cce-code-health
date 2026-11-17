@@ -1,10 +1,10 @@
 """Metric profiles. A profile is frozen once released; change it by adding a new one.
 
-python@0 is uncalibrated (weights chosen by hand). python@1 (docs/py1/design.md) takes
-CodeScene's observed flag levels as thresholds (cognitive > 9, bumps > 1, params > 4,
-boolops > 1), measures bumps as runs and boolops in conditions only (py_rules), and adds two
-metrics: state_writes (channels a method writes, classstate.py) and clones (statements in
-intra-file AST clones, pyclones.py). Weights are python@0's.
+python@0 is uncalibrated (weights chosen by hand). python@1 (frozen in v0.4.0;
+docs/py1/design.md) takes CodeScene's observed flag levels as thresholds (cognitive > 9,
+bumps > 1, params > 4, boolops > 1), measures bumps as runs and boolops in conditions only
+(py_rules), and adds two metrics: state_writes (channels a method writes, classstate.py) and
+clones (statements in intra-file AST clones, pyclones.py). Weights are python@0's.
 
 cpp@0 (C++, experimental) is uncalibrated too: thresholds and weights by analogy with
 python@0, with cyclomatic complexity (lizard's CCN) in place of cognitive complexity. A
