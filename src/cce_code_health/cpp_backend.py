@@ -90,6 +90,7 @@ def _skip_parens(toks: list[str], i: int) -> int:
 
 
 _SAME_LEVEL = {("else", "if"), ("if", "constexpr")}   # cpp@0: the second keyword opens no level
+_LOOP_TAGS = {"do": "do", "for": "loop", "while": "loop"}
 
 
 def _constexpr_head(toks: list[str], i: int, after: str | None) -> int | None:
@@ -105,13 +106,20 @@ def _constexpr_head(toks: list[str], i: int, after: str | None) -> int | None:
 class _NestingScan:
     """State of nesting_depth's token scan. Stack entries (kind, tag): kind "{" plain brace,
     "C{" braced control body, "C" braceless control body; tag "do" for a do body (its
-    trailing `while (...)` is skipped), "cx" for an if-constexpr body or its else (no level),
-    else None. `after` is the tag of the control body that ended just before this token."""
+    trailing `while (...)` is skipped), "loop" for a for or while body, "cx" for an
+    if-constexpr body or its else (no level), else None. `after` is the tag of the control
+    body that ended just before this token."""
 
-    def __init__(self, toks: list[str], flat_constexpr: bool):
-        self.toks, self.flat_constexpr = toks, flat_constexpr
+    def __init__(self, toks: list[str], flat_constexpr: bool, loop_credit: bool):
+        self.toks, self.flat_constexpr, self.loop_credit = toks, flat_constexpr, loop_credit
         self.stack: list[tuple[str, str | None]] = []
         self.best, self.after = 0, None
+
+    def level(self) -> int:
+        """Open control bodies on the current path; with loop_credit (cpp@1) one less when
+        the path holds two loops or more."""
+        tags = [g for k, g in self.stack if k != "{" and g != "cx"]
+        return len(tags) - (self.loop_credit and sum(g in ("do", "loop") for g in tags) >= 2)
 
     def close_statement(self) -> str | None:
         """Pop braceless bodies whose statement just ended; the tag of the last one popped."""
@@ -131,7 +139,7 @@ class _NestingScan:
                 return i + 2, None          # a runtime else holding an if constexpr: an else-if
         if t not in CONTROL and t not in CONTINUATION:
             return None
-        return i + (tuple(toks[i:i + 2]) in _SAME_LEVEL), "do" if t == "do" else None
+        return i + (tuple(toks[i:i + 2]) in _SAME_LEVEL), _LOOP_TAGS.get(t)
 
     def control(self, i: int) -> int | None:
         """If toks[i] opens a control body, push it and return the index after its head."""
@@ -142,7 +150,7 @@ class _NestingScan:
         i = _skip_parens(self.toks, i + 1)
         braced = self.toks[i:i + 1] == ["{"]
         self.stack.append(("C{" if braced else "C", tag))
-        self.best = max(self.best, sum(1 for k, g in self.stack if k != "{" and g != "cx"))
+        self.best = max(self.best, self.level())
         return i + braced
 
     def punct(self, t: str) -> None:
@@ -157,10 +165,12 @@ class _NestingScan:
             self.after = self.close_statement()
 
 
-def nesting_depth(toks: list[str], flat_constexpr: bool = False) -> int:
-    """Maximum depth of nested control statements in a token sequence. With flat_constexpr
-    (cpp@1), `if constexpr`, `else if constexpr` and their else open no level."""
-    scan, i = _NestingScan(toks, flat_constexpr), 0
+def nesting_depth(toks: list[str], flat_constexpr: bool = False,
+                  loop_credit: bool = False) -> int:
+    """Maximum depth of nested control statements in a token sequence. cpp@1 options:
+    flat_constexpr, `if constexpr`, `else if constexpr` and their else open no level;
+    loop_credit, a path that holds two loops or more (for, while, do) counts one less."""
+    scan, i = _NestingScan(toks, flat_constexpr, loop_credit), 0
     while i < len(toks):
         if toks[i] == "while" and scan.after == "do":
             scan.after = None
@@ -204,7 +214,8 @@ def analyze(path: str, source: str, profile=None) -> FileMetrics:
     head lines and suppressions always come from the source, which the view keeps aligned."""
     lizard = _lizard()
     allows = parse_allows(source, ALLOW_RE, SMELL_NAMES)
-    flat_constexpr = profile is not None and "preprocess" in profile.cpp_rules
+    rules = profile.cpp_rules if profile is not None else frozenset()
+    flat_constexpr, loop_credit = "preprocess" in rules, "loop_credit" in rules
     shown = measured = source
     if flat_constexpr:
         from .cpp_view import select_branches, unmark_constexpr  # noqa: PLC0415 (import cycle)
@@ -226,6 +237,7 @@ def analyze(path: str, source: str, profile=None) -> FileMetrics:
         funcs.append(CppFunctionMetrics(
             name=re.sub(r"\s+(?=\W)|(?<=\W)\s+", "", f.name), line=f.start_line,
             end=f.end_line, nloc=f.nloc, ccn=f.cyclomatic_complexity,
-            nesting=nesting_depth([t for _, t in toks[lo:hi]], flat_constexpr), params=f.parameter_count,
+            nesting=nesting_depth([t for _, t in toks[lo:hi]], flat_constexpr, loop_credit),
+            params=f.parameter_count,
             allows=[a for a in allows if not a.file_level and first - 1 <= a.line <= brace]))
     return FileMetrics(path, info.nloc, funcs, allows)

@@ -91,6 +91,9 @@ a dangling else after a braceless `if constexpr` body is read as flat; duplicati
 still read the raw source. Open (design choice, unchanged): the brace guard falls back to the first
 live branch; taking the best branch among those whose balance equals the first's would be better.
 
+Rule (2) as shipped (2026-11-17): the path rule above, in _NestingScan.level; Peclet nine repos
+cpp@1 10609.7 -> 10162.7 debt, brains 84 unchanged.
+
 ## Falsifiers (docs/cpp1/f1.cpp; expected numbers)
 
 - F1 if-constexpr chain with `?`: CCN 4 -> 2; nesting cpp@0 2, cpp@1 0.

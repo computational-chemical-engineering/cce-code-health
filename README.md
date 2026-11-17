@@ -166,8 +166,10 @@ of the live branches the one with the most decisions, ties to the first, unless 
 differs from the first live branch's), so code under `#ifdef`/`#else` no longer counts twice and
 unbalanced braces across branches no longer make lizard drop the functions that follow.
 `if constexpr` is not a decision, and `if constexpr`, `else if constexpr` and their else open no
-nesting level. Lines and suppressions refer to the source as written. Rules still to come: loop
-credit, kernel lambdas scored as functions, captures.
+nesting level. Rule (2), in place: a nesting path that holds two loops or more (for, while, do)
+counts one level less, so a triple loop with an `if` inside scores nesting 3, not 4. Lines and
+suppressions refer to the source as written. Rules still to come: kernel lambdas scored as
+functions, captures.
 
 `scan`, `diff`, `hotspots` and the gate's debt check cover C++ files. The gate's static rules
 `literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static

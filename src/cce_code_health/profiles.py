@@ -42,7 +42,8 @@ class Profile:
     # component of the qualified name.
     table_functions: frozenset = frozenset()
     # C++ measurement rules beyond cpp@0 (docs/CPP1_LAYERS.md): "preprocess" measures one
-    # branch per #if group and does not count `if constexpr` as a decision or a level.
+    # branch per #if group and does not count `if constexpr` as a decision or a level;
+    # "loop_credit" counts a nesting path that holds two loops or more one level less.
     cpp_rules: frozenset = frozenset()
 
 
@@ -63,8 +64,9 @@ PROFILES = {
 # In development, not frozen: rules are added one by one (docs/CPP1_LAYERS.md) and the
 # profile is released only after a Peclet run. Thresholds and weights of cpp@0 so far.
 _CPP0 = PROFILES["cpp@0"]
-PROFILES["cpp@1"] = replace(_CPP0, name="cpp@1", thresholds=dict(_CPP0.thresholds),
-                            weights=dict(_CPP0.weights), cpp_rules=frozenset({"preprocess"}))
+PROFILES["cpp@1"] = replace(
+    _CPP0, name="cpp@1", thresholds=dict(_CPP0.thresholds), weights=dict(_CPP0.weights),
+    cpp_rules=frozenset({"preprocess", "loop_credit"}))
 
 
 def get(name: str) -> Profile:

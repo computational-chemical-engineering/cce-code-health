@@ -168,3 +168,29 @@ def test_cpp1_through_config_and_scan(tmp_path):
     assert data["meta"]["profiles"] == {"cpp": "cpp@1"}
     (g,) = data["files"]["g.cpp"]["functions"]
     assert (g["ccn"], g["nloc"]) == (3, 4)
+
+
+F4 = """\
+void k() { for (int i=0;i<2;++i) for (int j=0;j<2;++j) for (int l=0;l<2;++l) if (i) c++; }
+void q(int a) { if (a) if (a>1) if (a>2) if (a>3) a++; }
+"""
+
+
+def test_f4_loop_credit():
+    from cce_code_health.report import function_debt
+    f0, f1 = fns(F4, CPP0), fns(F4, CPP1)
+    assert (f0["k"].nesting, f1["k"].nesting) == (4, 3)
+    assert (f0["q"].nesting, f1["q"].nesting) == (4, 4)
+    assert (function_debt(f0["k"], CPP0)[0], function_debt(f1["k"], CPP1)[0]) == (3.0, 0.0)
+    assert function_debt(f1["q"], CPP1)[0] == 3.0
+
+
+@pytest.mark.parametrize("code, depth", [
+    ("for (;;) { if (a) { for (;;) { if (b) {} } } }", 3),      # two loops on the path
+    ("for (;;) { if (a) { if (b) { if (c) {} } } }", 4),        # one loop: no credit
+    ("for (;;) {} if (a) { for (;;) { if (b) {} } }", 3),       # loops on different paths
+    ("do { while (a) { if (b) {} } } while (c);", 2),           # do and while are loops
+    ("while (a) { for (;;) {} } if (a) { if (b) { if (c) {} } }", 3),
+])
+def test_loop_credit_paths(code, depth):
+    assert nesting_depth([t for _, t in tokens(code)[0]], loop_credit=True) == depth
