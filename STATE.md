@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-16)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at bee116e, 477 tests.
+- Tagged v0.2.0 (plugin 0.2.0). main at 5110771, 483 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -30,14 +30,16 @@ Opus xhigh, with prototype docs/cpp1/proto.py and falsifiers docs/cpp1/f1.cpp); 
 2026-11-17 in docs/DECISIONS.md. Step 1 DONE (1bed7b9, paths) and step 2 DONE (317db57, markers:
 src/cce_code_health/zones.py, tests/test_zones.py). cpp@1 rule (1) DONE (bee116e: cpp_view.py,
 profile cpp@1 with cpp_rules={"preprocess"}, nesting via _NestingScan in cpp_backend.py; Peclet
-cpp@1 10609.7 / 84; trial config with cpp@1: f09cf2c9 session scratchpad c1.toml = base.toml with cpp@1). Byte-identity script (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files; arg OUTDIR;
+cpp@1 10609.7 / 84) and rule (2) DONE (5110771: loop credit, _NestingScan.level; cpp@1 10162.7 / 84).
+cpp@1 trial config: /tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml
+(base.toml with cpp@1; rebuild by sed if gone). Byte-identity script (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files; arg OUTDIR;
 needs PATH=.venv/bin): /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh,
 reference outputs in its before/; Peclet clones: /tmp/claude-1000/-home-eajfpeters-Code/6acb3080-ac42-4dda-bdfb-676e2b649813/scratchpad/peclet
 (zones trial config zm.toml beside ident.sh). Rebuild if gone.
 Peclet zones trial config (user globs > device K-only headers > device KOKKOS markers > host):
 README example plus docs/briefs/cpp1-layers-design.md addendum (dem has no K-only header).
-Next: cpp@1 rule (2) loop credit (add "loop_credit" to cpp_rules; extend _NestingScan: level
-minus 1 when the stack path holds >= 2 loops), then (3) kernel lambdas, (4) captures; each with its falsifier first (docs/CPP1_LAYERS.md lines 44-100, docs/cpp1/f1.cpp,
+Next: cpp@1 rule (3) kernel lambdas (split into own functions; largest change, prototype brains
+83 -> 62; route the design of the split through think if it is not mechanical), then (4) captures; each with its falsifier first (docs/CPP1_LAYERS.md lines 44-100, docs/cpp1/f1.cpp,
 prototype docs/cpp1/proto.py). cpp@1 is a NEW profile (cpp@0 frozen, bit-identical). Step 3 note
 from the think review: when kernel lambdas are split out, the enclosing function's nloc must drop
 the lambda lines (else fn_nloc double counts across zones); split lambdas get their zone from
@@ -54,7 +56,7 @@ Peclet's suite-scan scope and layer globs: addendum of docs/briefs/cpp1-layers-d
 ## Open requests
 
 - peclet-health: cpp@1 + zones; pins 1bed7b9 (paths) and 317db57 (markers, with nine-repo zone
-  table) sent 2026-11-17; bee116e (cpp@1 rule 1) sent 2026-11-17. It trials at its next round boundary (WO-28 on dem running) and sends
+  table) sent 2026-11-17; bee116e (cpp@1 rule 1) and 5110771 (rule 2) sent 2026-11-17. It trials at its next round boundary (WO-28 on dem running) and sends
   its own nine-repo table. Send a pin per cpp@1 rule.
 - User (via hub): public name of the zones config key (default `[[zones]]`). Desk card
   `decisions/cce-zones-name` (hub agrees with A); act only on a VERIFIED sign-off. Asked hub to
