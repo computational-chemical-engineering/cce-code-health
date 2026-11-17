@@ -1,7 +1,7 @@
 """Debt, smells and the display score for analysed files."""
 from __future__ import annotations
 
-from .profiles import Profile
+from .profiles import PROFILES, Profile
 from .python_backend import FileMetrics, FunctionMetrics
 
 # Display score only (same recipe as the 2026-11-11 prototype baseline).
@@ -170,6 +170,14 @@ def class_state_rises(rb: dict[str, dict], rh: dict[str, dict], changes) -> list
                        f"({_new_writes(old['channels'], c['channels'])})")
     sb = sum(c["state_writes"] for _, c in cls_b)
     sh = sum(c["state_writes"] for _, c in cls_h)
+    # Seed allowance: a step may introduce new classes holding up to class_state_threshold
+    # state_writes in total (a method object made from one long function's locals) when every
+    # base class still exists; their later growth is caught by the per-class rule above.
+    head_names = {c["name"] for _, c in cls_h}
+    new_sum = sum(c["state_writes"] for _, c in cls_h if c["name"] not in by_name)
+    if (sh > sb and not out and set(by_name) <= head_names
+            and new_sum <= PROFILES["python@1"].class_state_threshold):
+        return out
     if sh > sb and not out:
         new = [f"{c['name']} {c['state_writes']}" for _, c in cls_h
                if c["state_writes"] and c["name"] not in by_name]

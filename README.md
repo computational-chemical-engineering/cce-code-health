@@ -158,7 +158,16 @@ Docstring lines count in neither function nor file NLOC (both profiles).
   writes c)`. It is an error in the gate's refactor, restructure and interface modes and in
   `codehealth diff`, and a note in optimize mode (a cache field is legitimate there). Making the
   state local or returning a NamedTuple lowers it; moving it into a new state class leaves the
-  total unchanged.
+  total unchanged. Seed allowance: one step may introduce new classes holding up to 8
+  `state_writes` in total (the class_state threshold) when every class of the base's touched
+  files still exists, so turning one long function's locals into a small method object passes;
+  that class's later growth is caught per class. In optimize mode the `state_writes` part of
+  function debt is also left out of the debt comparison, so a cache field passes there.
+  Known escapes, which a reviewer must catch: state kept in closure `nonlocal` variables is not
+  seen (moving fields into closures lowers the count); writes through a local alias
+  (`s = self.s; s.x = v`) and mutating calls (`self.items.append(v)`) are not counted; a touched
+  file renamed out of scope leaves the base total (as for debt). Classes that accumulate a result
+  (builders, collectors) score high without being a defect.
 
 Allow names under `python@1` add `state_writes` and `clones`
 (`# codehealth: allow state_writes -- reason` clears that function debt, not the ratchet).

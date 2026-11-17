@@ -1528,6 +1528,10 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
         fns.update(before=function_debts(rb), after=function_debts(rh))
     db = sum(r["debt"] for r in rb.values())
     dh = sum(r["debt"] for r in rh.values())
+    if mode == "optimize":      # a cache field is legitimate here: its state_writes debt is not charged
+        def _state(rs):
+            return sum(f["debt_parts"].get("state_writes", 0) for r in rs.values() for f in r["functions"])
+        db, dh = db - _state(rb), dh - _state(rh)
     errors = new_errors(rb, rh, changes)
     if smells is not None:
         smells["size"] = [size_smells(rb), size_smells(rh)]

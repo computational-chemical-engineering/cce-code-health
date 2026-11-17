@@ -532,19 +532,79 @@ def test_unchanged_state_passes_and_a_new_class_rise_fails(tmp_path):
     moved = base.replace("class Run:", "class Other:\n    pass\n\n\nclass Run:")
     c, _, _ = check(tmp_path, base, moved)
     assert c.ok, c.detail
-    grown = base + '''
-
-class Extra:
-    def p(self):
-        self.q = 1
-
-    def r(self):
-        return self.q
-'''
+    small = base + extra(1)
     other = tmp_path / "g"
     other.mkdir()
-    c2, _, _ = check(other, base, grown)
-    assert not c2.ok and "class state rose over the touched files: 2 -> 3 (new: Extra 1)" in c2.detail
+    c2, _, _ = check(other, base, small)
+    assert "class state rose" not in c2.detail   # seed allowance (its 0.5 state debt still counts)
+    big = base + extra(9)
+    third = tmp_path / "h"
+    third.mkdir()
+    c3, _, _ = check(third, base, big)
+    assert not c3.ok and "class state rose over the touched files: 2 -> 11 (new: Extra 9)" in c3.detail
+
+
+def extra(n):
+    """A new class Extra with n channels (p writes q0..q{n-1}, r reads them)."""
+    w = "\n        ".join(f"self.q{i} = {i}" for i in range(n))
+    r = " + ".join(f"self.q{i}" for i in range(n))
+    return f"\n\nclass Extra:\n    def p(self):\n        {w}\n\n    def r(self):\n        return {r}\n"
+
+
+def test_seed_allowance_does_not_apply_when_a_base_class_disappears(tmp_path):
+    base = EXTRACTED.format(allow="") + "\n\nclass Gone:\n    pass\n"
+    head = EXTRACTED.format(allow="") + extra(1)
+    c, _, _ = check(tmp_path, base, head)
+    assert not c.ok and "class state rose over the touched files: 2 -> 3 (new: Extra 1)" in c.detail
+
+
+CACHE_BASE = '''
+class Store:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, k):
+        return self.data[k]
+'''
+CACHE_HEAD = '''
+class Store:
+    def __init__(self):
+        self.data = {}
+        self.cache = None
+
+    def get(self, k):
+        if self.cache is None:
+            self.cache = dict(self.data)
+        return self.cache[k]
+
+    def invalidate(self):
+        self.cache = None
+'''
+
+
+def test_optimize_mode_does_not_charge_a_cache_field(tmp_path):
+    c, db, dh = check(tmp_path, CACHE_BASE, CACHE_HEAD, mode="optimize")
+    assert c.ok, c.detail
+    other = tmp_path / "r"
+    other.mkdir()
+    c2, _, _ = check(other, CACHE_BASE, CACHE_HEAD, mode="refactor")
+    assert not c2.ok
+
+
+def test_nested_class_writes_are_not_the_methods_writes():
+    src = '''
+class A:
+    def f(self):
+        class I:
+            def m(self):
+                self.z = 1
+        return I
+
+    def g(self):
+        return self.z
+'''
+    r = file_report(fm(src), 0, P1)
+    assert next(c for c in r["classes"] if c["name"] == "A")["state_writes"] == 0
 
 
 def test_diff_has_the_ratchet(tmp_path, capsys):

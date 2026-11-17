@@ -65,11 +65,20 @@ def _store_targets(n: ast.AST) -> list:
     return []
 
 
+def _walk_own(m: ast.AST):
+    """ast.walk without descending into nested classes (their `self` is another object)."""
+    todo = [m]
+    while todo:
+        n = todo.pop()
+        yield n
+        todo.extend(c for c in ast.iter_child_nodes(n) if not isinstance(c, ast.ClassDef))
+
+
 def writes_reads(m: ast.AST, me: str) -> tuple[set[str], set[str]]:
     """(keys m writes, keys m loads) through its first parameter `me`."""
     w: set[str] = set()
     r: set[str] = set()
-    for n in ast.walk(m):
+    for n in _walk_own(m):
         for t in _flat(_store_targets(n)):
             k = _key(t, me)
             if k:
@@ -109,7 +118,7 @@ def constructors(cls: ast.ClassDef) -> set[str]:
     callers: dict[str, set[str]] = {m.name: set() for m in methods}
     for m in methods:
         me = _self_name(m)
-        for n in ast.walk(m):
+        for n in _walk_own(m):
             if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                     and isinstance(n.func.value, ast.Name) and n.func.value.id == me
                     and n.func.attr in callers):
