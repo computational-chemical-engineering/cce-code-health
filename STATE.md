@@ -18,7 +18,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
     callers follow `from M import` moves; private names may be renamed); `[gate] no_implicit_reexport` set. Nothing open.
   - pymrm c1 closed locally (debt 1282.8 -> 80.0, health 5.82 -> 9.57); its push waits
     for a Desk sign-off. Its trial-config report fixed in cc00407. Nothing open.
-  - Peclet (dem landed, flow F1-F3): session peclet-health (TRS2, from 2026-11-17) replaces
+  - Peclet (v0.3.0 pinned 2026-11-17, baseline cpp@1 9619.1 / 64; gates switch to cpp@1 with its next WO): session peclet-health (TRS2) replaces
     peclet_health and plans suite-wide work; status digest sent 2026-11-17 (per-package numbers,
     cpp@0 limits, cpp@1 ideas for device code). Builds and tests on TRS2 only through it. Nothing open.
 

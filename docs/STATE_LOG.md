@@ -91,3 +91,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 - 2026-11-17 zones name: Desk card cce-zones-name VERIFIED choice A, keep `[[zones]]`/zone/zones (no code change); docs updated.
 - 2026-11-17 Peclet cpp@1 trial (peclet-health, TRS2, 534fa62): 9947.6 / 64 vs cpp@0 11162.9 / 91; captures > 12 (e4688ce, 17.5 % -> 6.1 % of kernels flagged; clones 9349.7); release 0.3.0 prepared at 46a0b5a (local branch), DECISION-REQUEST to hub.
 - 2026-11-17 v0.3.0 TAGGED at a2c3829 (Desk card cce-v030-release VERIFIED A, executed): cpp@1 frozen (captures > 12), zones. peclet-health: user-facing rounds gated with gate --behaviour-only + diff (no new mode).
+- 2026-11-17 peclet-health re-pinned TRS2 venv to v0.3.0 (complexipy 9.0.0 -> 8.3.0); v0.3.0 baseline suite cpp@1 9619.1 / 64 (user 1066/5, host 5975/40, device 2578/19); gates switch to cpp@1 with its next work order. Told it python@0 differs under complexipy 9 (pymrm 1109.8 vs 1282.8).
