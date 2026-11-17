@@ -16,7 +16,7 @@ from . import __version__, architecture, config, coupling, gitio, zones
 from . import gate as gatemod
 from .hook import cmd_hook
 from .duplication import duplicated_lines
-from .report import new_file_smells
+from .report import class_state_rises, new_file_smells
 from .python_backend import analyze
 from .report import file_report
 
@@ -63,7 +63,7 @@ def _analyze(path: str, text: str, p):
     if p.language == "cpp":
         from .cpp_backend import analyze as analyze_cpp  # noqa: PLC0415 (needs lizard)
         return analyze_cpp(path, text, p)
-    return analyze(path, text, p.varargs_params)
+    return analyze(path, text, p.varargs_params, p.py_rules, p.clone_window, p.clone_min_nodes)
 
 
 def totals(reports: dict[str, dict]) -> dict:
@@ -169,6 +169,7 @@ def cmd_diff(a) -> int:
     base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
     smell_errors, smell_notes = new_file_smells(rb, rh, ch)
     failures += smell_errors
+    failures += class_state_rises(rb, rh, ch)
     rows = []
     for path, r in sorted(rh.items()):
         old = rb.get(counterpart.get(path) or "")

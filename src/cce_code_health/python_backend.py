@@ -3,6 +3,10 @@
 A "unit" is a function or method defined at module level or directly in a class body
 (classes may nest). Functions nested inside a unit belong to that unit, as in
 complexipy's cognitive complexity.
+
+python@1 (profile py_rules, docs/py1/design.md) measures bumps as runs (bumps_runs), boolops in
+conditions only (boolops_conditions), and adds state_writes (classstate.py), clones
+(pyclones.py) and `public`. With no rules the python@0 path is unchanged.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ from dataclasses import dataclass, field
 
 import complexipy
 
-from . import cohesion
+from . import classstate, cohesion, pyclones
 from .profiles import METRICS
 
 # Nesting counts branches, loops and exception handling, not context managers.
@@ -26,6 +30,9 @@ NON_CODE = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
             tokenize.DEDENT, tokenize.ENCODING, tokenize.ENDMARKER}
 ALLOW_RE = re.compile(r"#\s*codehealth:\s*allow(-file)?\s+([\w,\s]+?)\s*(?:--\s*(.*\S))?\s*$")
 SMELL_NAMES = set(METRICS) | {"all", "large_file", "huge_file", "duplication"}
+PY1_SMELL_NAMES = frozenset(SMELL_NAMES | {"state_writes", "clones"})   # python@1 allow names
+# python@1 bump levels: branches and loops; try and with do not count.
+LEVEL = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Match)
 
 
 @dataclass
@@ -53,6 +60,9 @@ class FunctionMetrics:
     params: int
     boolops: int
     allows: list = field(default_factory=list)
+    state_writes: int | None = None   # python@1 only (None: not measured)
+    clones: int | None = None         # python@1 only
+    public: bool | None = None        # python@1 only: no "_"-prefixed qualname component
 
     def value(self, metric: str) -> int:
         return getattr(self, metric)
@@ -97,6 +107,76 @@ def boolops(func: ast.AST) -> int:
             return len(n.values) - 1 + sum(count(v) for v in n.values)
         return 0
     return max((count(n) for n in ast.walk(func) if isinstance(n, ast.BoolOp)), default=0)
+
+
+def _statement_levels(func: ast.AST):
+    """(statement, level) in source order, header before body; level = number of enclosing
+    LEVEL statements, + 1 if the statement is one. elif stays on its if's level. Nested defs are
+    walked as part of the unit, classes are skipped."""
+    out = []
+
+    def walk(stmts, depth):
+        for s in stmts:
+            if isinstance(s, ast.ClassDef):
+                continue
+            counted = isinstance(s, LEVEL)
+            out.append((s, depth + counted))
+            inner = depth + counted
+            for name in ("body", "handlers", "orelse", "finalbody"):   # source order
+                sub = getattr(s, name, None)
+                if not sub:
+                    continue
+                if name == "handlers":
+                    for h in sub:
+                        walk(h.body, inner)
+                elif (name == "orelse" and isinstance(s, ast.If) and len(sub) == 1
+                        and isinstance(sub[0], ast.If)):
+                    walk(sub, depth)                  # elif: the if's level
+                else:
+                    walk(sub, inner)
+            if isinstance(s, ast.Match):
+                for c in s.cases:
+                    walk(c.body, inner)
+    walk(func.body, 0)
+    return out
+
+
+def bumps_runs(func: ast.AST) -> int:
+    """python@1: maximal runs of consecutive statements at level >= 2."""
+    n, inrun = 0, False
+    for _, level in _statement_levels(func):
+        if level >= 2:
+            n += not inrun
+            inrun = True
+        else:
+            inrun = False
+    return n
+
+
+def _bool_count(n: ast.AST) -> int:
+    if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not):
+        return _bool_count(n.operand)
+    if isinstance(n, ast.BoolOp):
+        return len(n.values) - 1 + sum(_bool_count(v) for v in n.values)
+    return 0
+
+
+def boolops_conditions(func: ast.AST) -> int:
+    """python@1: largest number of boolean operators in one if, elif or while condition or
+    match guard."""
+    best = 0
+    for n in ast.walk(func):
+        if isinstance(n, (ast.If, ast.While)):
+            best = max(best, _bool_count(n.test))
+        elif isinstance(n, ast.match_case) and n.guard is not None:
+            best = max(best, _bool_count(n.guard))
+    return best
+
+
+def is_public(qualname: str) -> bool:
+    """No "_"-prefixed component in the qualified name; dunders are public."""
+    return not any(p.startswith("_") and not (p.startswith("__") and p.endswith("__"))
+                   for p in qualname.split("."))
 
 
 def params(func: ast.AST, varargs_weight: int) -> int:
@@ -153,13 +233,15 @@ def parse_allows(source: str, pattern: re.Pattern = ALLOW_RE,
     return out
 
 
-def analyze(path: str, source: str, varargs_weight: int = 3) -> FileMetrics:
+def analyze(path: str, source: str, varargs_weight: int = 3, rules: frozenset = frozenset(),
+            clone_window: int = 3, clone_min_nodes: int = 30) -> FileMetrics:
+    """`rules`: the profile's py_rules (empty for python@0)."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError) as exc:
         return FileMetrics(path, 0, [], [], error=f"parse: {exc}")
     lines = code_lines(source, tree)
-    allows = parse_allows(source)
+    allows = parse_allows(source, names=PY1_SMELL_NAMES) if rules else parse_allows(source)
     try:
         cog = {f.line_start: f.complexity
                for f in complexipy.code_complexity(source).functions}
@@ -176,7 +258,31 @@ def analyze(path: str, source: str, varargs_weight: int = 3) -> FileMetrics:
             name=name, line=node.lineno, end=node.end_lineno,
             nloc=sum(1 for i in span if i in lines),
             cognitive=cog.get(start, cog.get(node.lineno, 0)),
-            nesting=nesting_depth(node), bumps=bumps(node),
-            params=params(node, varargs_weight), boolops=boolops(node),
+            nesting=nesting_depth(node),
+            bumps=bumps_runs(node) if "bump_runs" in rules else bumps(node),
+            params=params(node, varargs_weight),
+            boolops=boolops_conditions(node) if "cond_boolops" in rules else boolops(node),
             allows=fn_allows))
-    return FileMetrics(path, len(lines), funcs, allows, error, cohesion.classes(tree))
+    classes = cohesion.classes(tree)
+    if rules:
+        _py1(tree, funcs, classes, rules, clone_window, clone_min_nodes)
+    return FileMetrics(path, len(lines), funcs, allows, error, classes)
+
+
+def _py1(tree, funcs, classes, rules, clone_window, clone_min_nodes) -> None:
+    """Class state, clones and `public` for the units (in units() order) and the class records."""
+    nodes = [node for _, node in units(tree)]
+    writes: dict[int, int] = {}
+    if "state" in rules:
+        for rec, (_, chan, per_method) in zip(classes, classstate.classes(tree)):
+            writes.update({id(m): n for m, n in per_method.items()})
+            rec["state_writes"] = classstate.class_state_writes(chan)
+            rec["channels"] = chan
+    marked = (pyclones.marked_statements(tree, clone_window, clone_min_nodes)
+              if "clones" in rules else set())
+    for fm, node in zip(funcs, nodes):
+        if "state" in rules:
+            fm.state_writes = writes.get(id(node), 0)
+        if "clones" in rules:
+            fm.clones = pyclones.count_in(node, marked)
+        fm.public = is_public(fm.name)

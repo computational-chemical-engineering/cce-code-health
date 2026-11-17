@@ -1508,15 +1508,19 @@ def function_debts(reports: dict[str, dict]) -> dict[str, float]:
 
 
 def debt_check(repo: Path, base: str, cfg: config.Config, changes,
-               fns: dict | None = None, smells: dict | None = None) -> tuple[Check, float, float]:
+               fns: dict | None = None, smells: dict | None = None,
+               mode: str = "refactor") -> tuple[Check, float, float]:
     """Debt over the touched in-scope files must not rise, and no touched file may newly fail
     analysis (it would score 0 debt), in every mode: (check, before, after). `fns`, if given,
     receives {"before": {path::name: debt}, "after": {...}} over the touched files (functions
     with debt only), so that `codehealth log` can report a function target's own delta.
     `smells`, if given, receives {"size": [before, after]}: the size-smell weight over the
-    touched files (report.size_smells), the gain of a file split in restructure mode."""
+    touched files (report.size_smells), the gain of a file split in restructure mode.
+    Class-state ratchet (python@1, report.class_state_rises): class state_writes over the touched
+    files may not rise, an error in refactor, restructure and interface `mode`, a note in
+    optimize mode (a cache field is legitimate there)."""
     from .cli import analyze_ref, new_errors  # noqa: PLC0415 (cli imports this module)
-    from .report import new_file_smells, size_smells  # noqa: PLC0415
+    from .report import class_state_rises, new_file_smells, size_smells  # noqa: PLC0415
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
     rb, rh = analyze_ref(repo, base, cfg, bp), analyze_ref(repo, None, cfg, hp)
@@ -1524,6 +1528,10 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
         fns.update(before=function_debts(rb), after=function_debts(rh))
     db = sum(r["debt"] for r in rb.values())
     dh = sum(r["debt"] for r in rh.values())
+    if mode == "optimize":      # a cache field is legitimate here: its state_writes debt is not charged
+        def _state(rs):
+            return sum(f["debt_parts"].get("state_writes", 0) for r in rs.values() for f in r["functions"])
+        db, dh = db - _state(rb), dh - _state(rh)
     errors = new_errors(rb, rh, changes)
     if smells is not None:
         smells["size"] = [size_smells(rb), size_smells(rh)]
@@ -1532,12 +1540,17 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     # without a restructure); duplication concentrated by a split is a note
     smell_errors, smell_notes = new_file_smells(rb, rh, changes)
     errors += smell_errors
+    state = class_state_rises(rb, rh, changes)
+    if mode != "optimize":
+        errors += state
     base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
     brains = sorted(f"{r['path']}::{f['name']}" for r in rh.values() for f in r["functions"]
                     if f["brain"] and f["name"] not in base_brains)
     note = [f"new brain function(s): {', '.join(brains[:3])} (an intermediate; the milestone must "
             f"bring the count back)"] if brains else []
     note += smell_notes[:2]
+    if mode == "optimize":
+        note += [f"note: {m} (allowed in optimize mode)" for m in state[:2]]
     if cfg.zones:
         from .zones import compare, compare_text  # noqa: PLC0415
         note.append(compare_text(compare(rb, rh, cfg.zones)))
@@ -1655,11 +1668,12 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
                 if plan_data.get(k):
                     info["plan"][k] = plan_data[k]
     restructuring = mode == "restructure"
+    gate_mode = mode
     mode = "refactor" if mode in ("restructure", "interface") else mode   # tiers and config checks as in refactor
     changes = gitio.changes(repo, base, None)
     fns: dict = {}
     smells: dict = {}
-    debt, db, dh = debt_check(repo, base, cfg, changes, fns, smells)
+    debt, db, dh = debt_check(repo, base, cfg, changes, fns, smells, gate_mode)
     sb, sh = smells["size"]
     if info is not None:
         info.update(debt_before=round(db, 2), debt_after=round(dh, 2), function_debt=fns,

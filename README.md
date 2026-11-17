@@ -88,7 +88,8 @@ follow-up brings the new functions under the brain thresholds, and health recove
 
 `diff` compares the merge-base of `--base` and head (default: working tree) and uses the
 base's `.codehealth/config.toml`. It fails if debt over the touched files rises, a file
-smell (large file, duplication) appears, or a new brain function appears.
+smell (large file, duplication) appears, or a new brain function appears; under `python@1`
+also if class state rises (the class-state ratchet below).
 
 Optional `.codehealth/config.toml`:
 
@@ -104,6 +105,72 @@ Suppress a smell for one function with a comment on the line above it or on its 
 line; the reason is mandatory and every new suppression is listed by `diff`:
 `# codehealth: allow params -- public API, kept for compatibility`.
 File-level smells use `allow-file`.
+
+### Profile python@1
+
+Opt in with `[profiles] python = "python@1"` (or `profile = "python@1"`); `python@0` stays the
+default and its output is unchanged. Design and calibration: `docs/py1/design.md`.
+
+| metric | python@0 | python@1 |
+|---|---|---|
+| cognitive | > 15, weight 1 | > 9, weight 1 |
+| nloc | > 70, weight 0.1 | > 70, weight 0.1 |
+| nesting | > 3, weight 3 | > 3, weight 3 |
+| bumps | > 2, weight 2 | > 1, weight 2 (runs, see below) |
+| params | > 5, weight 1 | > 4, weight 1 (public and private alike) |
+| boolops | > 2, weight 1 | > 1, weight 1 (conditions only, see below) |
+| state_writes | | > 0, weight 0.5 |
+| clones | | > 0, weight 0.2 |
+
+Brain functions, file sizes, cross-file duplication and complexipy 8.3.0 are as in `python@0`.
+Docstring lines count in neither function nor file NLOC (both profiles).
+
+- **bumps**: the function's statements in source order (nested defs included, classes skipped)
+  get a level: the number of enclosing `if`, `for`, `while` and `match` statements, plus 1 if
+  the statement is one itself (`try` and `with` do not count; `elif` stays on its `if`'s level).
+  A bump is a maximal run of consecutive statements at level 2 or more.
+- **boolops**: the most `and`/`or` operators in one `if`, `elif` or `while` condition or `match`
+  guard (assignments, returns, comprehensions and conditional expressions do not count).
+- **state_writes** (class state): per class, constructors are `__init__`, `__post_init__`,
+  `__new__`, `__init_subclass__`, `__setstate__`, `__enter__`, `setUp`, `setUpClass`,
+  `setup_method`, `setup_class`, plus constructor helpers (private methods called through
+  `self.m()` only from constructors); staticmethods, classmethods, setters and deleters are left
+  out. A store through `self` writes a key (`self.a`, `self.a.b`, `self.a["k"]` also writes `a`,
+  `self.a[i]` writes `a`, `setattr(self, "k", v)`; assignments, augmented and annotated ones,
+  `del`, `for` and `with` targets, unpacking). A key is a channel when another method writes it,
+  it is not a method name, and some other method reads it or two methods write it. A method's
+  `state_writes` is the number of channels it writes; a class's is the sum over channels of their
+  writers. Class records gain `state_writes` and `channels` ({key: [writer methods]}).
+- **clones**: within one file, windows of 3 consecutive statements inside functions (docstrings
+  dropped) with at least 30 AST nodes and one compound statement are compared by structure (names,
+  attributes, constants, f-strings and subscripts abstracted, keyword names kept); equal windows at
+  two or more non-overlapping places form a group. A function's `clones` is the number of its
+  statements (nested ones included) inside a group: statements, not lines, so formatting does not
+  move it.
+- **`public`**: each function record gains `public` (no `_`-prefixed component in the qualified
+  name; dunders are public), so a campaign can leave frozen-API debt out of its targets.
+- **class_state smell**: a class with `state_writes` > 8 goes in the file's `class_smells` list
+  ({name, line, smell, state_writes}), not in `file_smells`, so moving a class to a new file is
+  not a new file smell. Display health subtracts 1.0 per flagged class (at most 2.0 per file).
+- **Class-state ratchet**: over the touched files, raw class `state_writes` (allow comments do not
+  count) may not rise in total, and no class of the base's touched files may rise. The message
+  names the new writes, e.g. `class state rose: _NewtonRun 54 -> 57 (_phase1 writes a, b; _phase2
+  writes c)`. It is an error in the gate's refactor, restructure and interface modes and in
+  `codehealth diff`, and a note in optimize mode (a cache field is legitimate there). Making the
+  state local or returning a NamedTuple lowers it; moving it into a new state class leaves the
+  total unchanged. Seed allowance: one step may introduce new classes holding up to 8
+  `state_writes` in total (the class_state threshold) when every class of the base's touched
+  files still exists, so turning one long function's locals into a small method object passes;
+  that class's later growth is caught per class. In optimize mode the `state_writes` part of
+  function debt is also left out of the debt comparison, so a cache field passes there.
+  Known escapes, which a reviewer must catch: state kept in closure `nonlocal` variables is not
+  seen (moving fields into closures lowers the count); writes through a local alias
+  (`s = self.s; s.x = v`) and mutating calls (`self.items.append(v)`) are not counted; a touched
+  file renamed out of scope leaves the base total (as for debt). Classes that accumulate a result
+  (builders, collectors) score high without being a defect.
+
+Allow names under `python@1` add `state_writes` and `clones`
+(`# codehealth: allow state_writes -- reason` clears that function debt, not the ratchet).
 
 ### Change coupling
 

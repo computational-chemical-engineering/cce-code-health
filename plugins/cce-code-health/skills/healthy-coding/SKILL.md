@@ -16,7 +16,12 @@ change in a repo with `.codehealth/config.toml`, by any agent.
    learned in this repo's campaigns). They are binding, like a style guide.
 2. Note the profile thresholds in `.codehealth/config.toml` (Python profile python@0:
    cognitive complexity 15, function length 70 lines of code, nesting 3, `if`/loop
-   "bumps" 2, parameters 5, boolean operators per condition 2).
+   "bumps" 2, parameters 5, boolean operators per condition 2. Profile python@1:
+   cognitive complexity 9, function length 70, nesting 3, bumps 1 (runs of statements two
+   `if`/loop levels deep), parameters 4, boolean operators per `if`/`while` condition 1,
+   plus `state_writes` 0 (fields a method writes that other methods read) and `clones` 0
+   (statements in repeated three-statement blocks in one file). Under python@1 the gate also
+   fails when class state rises, except in optimize mode).
 
 ## While writing
 

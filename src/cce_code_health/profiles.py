@@ -1,7 +1,10 @@
 """Metric profiles. A profile is frozen once released; change it by adding a new one.
 
-python@0 is uncalibrated (weights chosen by hand). python@1 will be calibrated
-against CodeScene on files a refactor campaign does not touch.
+python@0 is uncalibrated (weights chosen by hand). python@1 (docs/py1/design.md) takes
+CodeScene's observed flag levels as thresholds (cognitive > 9, bumps > 1, params > 4,
+boolops > 1), measures bumps as runs and boolops in conditions only (py_rules), and adds two
+metrics: state_writes (channels a method writes, classstate.py) and clones (statements in
+intra-file AST clones, pyclones.py). Weights are python@0's.
 
 cpp@0 (C++, experimental) is uncalibrated too: thresholds and weights by analogy with
 python@0, with cyclomatic complexity (lizard's CCN) in place of cognitive complexity. A
@@ -18,6 +21,7 @@ from dataclasses import dataclass, field, replace
 METRICS = ("cognitive", "nloc", "nesting", "bumps", "params", "boolops")
 CPP_METRICS = ("ccn", "nloc", "nesting", "params")
 CPP1_METRICS = CPP_METRICS + ("captures",)    # captures: kernel lambdas only (cpp@1 rule 4)
+PY1_METRICS = METRICS + ("state_writes", "clones")
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,14 @@ class Profile:
     kernel_calls: tuple = ()
     # cpp@1 rule (4): kernel macros whose lambda captures *this (one capture).
     kernel_this_macros: tuple = ()
+    # Python measurement rules beyond python@0 (docs/py1/design.md): "bump_runs" counts bumps
+    # as runs of statements at level >= 2; "cond_boolops" counts boolean operators in if, elif
+    # and while conditions and match guards only; "state" measures state_writes per method and
+    # per class; "clones" measures statements in intra-file AST clones.
+    py_rules: frozenset = frozenset()
+    class_state_threshold: int = 8   # display smell class_state above this class state_writes
+    clone_window: int = 3            # statements per clone window
+    clone_min_nodes: int = 30        # AST nodes per clone window
 
 
 PROFILES = {
@@ -78,6 +90,14 @@ PROFILES["cpp@1"] = replace(
     cpp_rules=frozenset({"preprocess", "loop_credit", "kernels"}),
     kernel_macros=("KOKKOS_LAMBDA", "KOKKOS_CLASS_LAMBDA"), kernel_this_macros=("KOKKOS_CLASS_LAMBDA",),
     kernel_calls=("parallel_for", "parallel_reduce", "parallel_scan"))
+
+# python@1 (docs/py1/design.md): thresholds at CodeScene's flag levels, python@0's weights.
+_PY0 = PROFILES["python@0"]
+PROFILES["python@1"] = replace(
+    _PY0, name="python@1", metrics=PY1_METRICS,
+    thresholds=dict(_PY0.thresholds, cognitive=9, bumps=1, params=4, boolops=1, state_writes=0, clones=0),
+    weights=dict(_PY0.weights, state_writes=0.5, clones=0.2),
+    py_rules=frozenset({"bump_runs", "cond_boolops", "state", "clones"}))
 
 
 def get(name: str) -> Profile:
