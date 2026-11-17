@@ -12,7 +12,7 @@ from pathlib import Path
 
 import tempfile
 
-from . import __version__, architecture, config, coupling, gitio
+from . import __version__, architecture, config, coupling, gitio, zones
 from . import gate as gatemod
 from .hook import cmd_hook
 from .duplication import duplicated_lines
@@ -44,9 +44,12 @@ def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
             from .cpp_backend import blank_comments  # noqa: PLC0415 (optional backend)
             group = {k: blank_comments(v) for k, v in group.items()}
         dup.update(duplicated_lines(group, p.dup_window))
-    return {path: file_report(_analyze(path, texts[path], cfg.profile_for(path)), dup.get(path, 0),
-                              cfg.profile_for(path))
-            for path in files if path in texts and (only is None or path in only)}
+    out = {path: file_report(_analyze(path, texts[path], cfg.profile_for(path)), dup.get(path, 0),
+                             cfg.profile_for(path))
+           for path in files if path in texts and (only is None or path in only)}
+    if cfg.zones:
+        zones.annotate(out, cfg.zones)
+    return out
 
 
 def new_errors(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[str]:
@@ -122,8 +125,10 @@ def cmd_scan(a) -> int:
     reports = analyze_ref(repo, ref, cfg)
     t = totals(reports)
     groups = group_totals(reports, a.group_depth) if a.group_depth else None
+    zt = zones.zone_totals(reports, cfg.zones) if cfg.zones else None
     write_json(a.json, {"meta": meta(repo, cfg, ref=ref or "worktree", schema=SCAN_SCHEMA), "totals": t,
-                        "files": reports, **({"groups": groups} if groups is not None else {})})
+                        "files": reports, **({"groups": groups} if groups is not None else {}),
+                        **({"zones": zt} if zt is not None else {})})
     print(f"{'file':60} {'nloc':>6} {'debt':>8} {'health':>6}  file smells")
     for r in sorted(reports.values(), key=lambda r: -r["debt"])[:a.top]:
         print(f"{r['path'][-60:]:60} {r['nloc']:6} {r['debt']:8.1f} {r['health']:6.1f}  {','.join(r['file_smells'])}")
@@ -133,6 +138,8 @@ def cmd_scan(a) -> int:
         for g, x in sorted(groups.items(), key=lambda kv: -kv[1]["debt"]):
             print(f"{g[-60:]:60} {x['nloc']:6} {x['debt']:8.1f} {x['health']:6.1f} {x['files']:5} "
                   f"{x['brain_functions']:5}")
+    if zt is not None:
+        print("\n" + "\n".join(zones.table(zt)))
     print(f"SCAN {repo.name}@{(ref or 'worktree')[:10]} profile={cfg.label()}: "
           f"{t['files']} files, {t['nloc']} NLOC, debt {t['debt']} ({t['debt_per_kloc']}/kNLOC), "
           f"health {t['health']}, functions with debt {t['functions_with_debt']}/{t['functions']}, "
@@ -182,6 +189,9 @@ def cmd_diff(a) -> int:
         if abs(d1 - d0) > EPS:
             name = hp if bp in (None, hp) else f"{bp} -> {hp}"
             rows.append(f"  {st} {name}: debt {d0:.1f} -> {d1:.1f}")
+    zc = zones.compare(rb, rh, cfg.zones) if cfg.zones else None
+    rows += [f"  zone {z}: debt {x['debt_before']:.1f} -> {x['debt_after']:.1f}, new brains {x['new_brains']}"
+             for z, x in (zc or {}).items()]
     arch = architecture.compare_refs(repo, base, head, cfg)   # None without [architecture]
     if arch:
         failures += arch[0]
@@ -219,6 +229,7 @@ def cmd_diff(a) -> int:
                         "debt_base": round(db, 3), "debt_head": round(dh, 3),
                         "failures": failures, "notes": smell_notes, "base": rb, "head": rh,
                         **({"architecture_improvements": arch[1]} if arch else {}),
+                        **({"zones": zc} if zc is not None else {}),
                         **({"docs": {"warnings": doc_res.warnings, "notes": doc_res.notes,
                                      "review": sorted(set(doc_res.review))}} if doc_res else {})})
     print("\n".join(rows))

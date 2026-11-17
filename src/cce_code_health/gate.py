@@ -208,6 +208,7 @@ import re
 import shlex
 import statistics
 import subprocess
+import tomllib
 import resource
 import shutil
 import signal
@@ -698,6 +699,32 @@ def _selected(cfg: config.Config, cadence: str, mode: str, gitdir: Path | None =
 
 
 THREAD_PINS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def _head_gate(repo: Path) -> dict | None:
+    """HEAD's [gate] table, or None when HEAD's config does not parse."""
+    try:
+        return config.load(repo, "HEAD").gate
+    except ValueError:
+        return None
+
+
+def _worktree_zones_problems(repo: Path, changes) -> list[str]:
+    """Problems of a [[zones]] table the step changes: the gate runs on the base's config, so a
+    malformed table would otherwise first fail every command after it lands."""
+    if not any(config.CONFIG_PATH in (b, h) for _, b, h in changes):
+        return []
+    path = repo / config.CONFIG_PATH
+    if not path.is_file():
+        return []
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError:
+        return []
+    if config.ZONES_KEY not in data:
+        return []
+    from .zones import check_config  # noqa: PLC0415
+    return [f"{config.CONFIG_PATH}: {b}" for b in check_config(data[config.ZONES_KEY])[1]]
 
 
 def config_checks(cfg: config.Config, changes, cadence: str, mode: str) -> list[Check]:
@@ -1406,6 +1433,9 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     note = [f"new brain function(s): {', '.join(brains[:3])} (an intermediate; the milestone must "
             f"bring the count back)"] if brains else []
     note += smell_notes[:2]
+    if cfg.zones:
+        from .zones import compare, compare_text  # noqa: PLC0415
+        note.append(compare_text(compare(rb, rh, cfg.zones)))
     return (Check("debt", dh <= db + 1e-9 and not errors,
                   "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3] + note)), db, dh)
 
@@ -1538,7 +1568,7 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
         debt.ok = True
         debt.detail += " (reported, not gated: --behaviour-only)"
         static = []
-        if config_override is None and config.load(repo, "HEAD").gate != cfg.gate:
+        if config_override is None and _head_gate(repo) != cfg.gate:
             extra = [Check("tier_config", True, "note: the head's [gate] table differs from the base's; "
                            "the tiers ran from the base's config")]
     else:
@@ -1549,6 +1579,10 @@ def gate(repo: Path, base_ref: str, cadence: str, log_path: Path,
             c.ok = True
             c.detail += " (allowed: exact revert)"
     checks = config_checks(cfg, changes, cadence, mode) + static + [debt] + extra
+    zones_bad = _worktree_zones_problems(repo, changes)
+    if zones_bad:
+        checks[0].ok = False
+        checks[0].detail = "; ".join(filter(None, [checks[0].detail, *zones_bad]))
     if require_gain:
         split = restructuring and dh <= db + 1e-9 and sh < sb   # a split that removes a size smell
         gained = dh < db - 1e-9 or split

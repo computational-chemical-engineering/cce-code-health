@@ -8,6 +8,9 @@ for scope, frozen and forbid patterns.
 Profiles: `profile` (default python@0) measures Python. Other languages are measured only
 when a [profiles] table names a profile for them, e.g. `[profiles] cpp = "cpp@0"`; their
 files are otherwise out of scope. [profiles] may also name the Python profile.
+
+Zones (reporting per layer, zones.py) are read from the array named ZONES_KEY, the one place
+that names it.
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ from . import gitio, profiles
 
 CONFIG_PATH = ".codehealth/config.toml"
 SCHEMA = 1
+ZONES_KEY = "zones"     # [[zones]]: the config key of zones.py, named only here
 EXTENSIONS = {".py": "python",
               **dict.fromkeys((".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h", ".ipp",
                                ".tpp", ".cu", ".cuh"), "cpp")}
@@ -51,6 +55,7 @@ class Config:
     architecture: dict = field(default_factory=dict)   # raw [architecture] table (architecture.py)
     docs: dict = field(default_factory=dict)           # raw [docs] table (docs.py, docstrings.py)
     other_profiles: dict = field(default_factory=dict)   # language -> Profile, not Python
+    zones: list = field(default_factory=list)          # [[zones]] rules (zones.py); [] = no zones
 
     def profile_for(self, path: str) -> profiles.Profile | None:
         lang = EXTENSIONS.get(Path(path).suffix)
@@ -72,7 +77,13 @@ def parse(text: str, source: str) -> Config:
         raise ValueError(f"{source}: schema must be {SCHEMA}, got {data.get('schema')!r}")
     scope = data.get("scope", {})
     python, other = _profiles(data)
-    return Config(profile=python, include=list(scope.get("include", ["*"])),
+    zones = data.get(ZONES_KEY, [])
+    if ZONES_KEY in data:
+        from .zones import check_config as zones_check  # noqa: PLC0415 (zones imports config)
+        zones_bad = zones_check(zones)[1]
+        if zones_bad:
+            raise ValueError(f"{source}: " + "; ".join(zones_bad))
+    return Config(zones=list(zones), profile=python, include=list(scope.get("include", ["*"])),
                   exclude=list(scope.get("exclude", [])), source=source,
                   gate=dict(data.get("gate", {})), hook=dict(data.get("hook", {})),
                   architecture=dict(data.get("architecture", {})), other_profiles=other,
@@ -107,7 +118,7 @@ def load(repo: Path, ref: str | None) -> Config:
     return parse(texts[CONFIG_PATH], f"{ref or 'worktree'}:{CONFIG_PATH}")
 
 
-TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architecture", "docs"}
+TOP_KEYS = {"schema", "profile", "profiles", "scope", "gate", "hook", "architecture", "docs", ZONES_KEY}
 HOOK_KEYS = {"enabled"}
 SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "no_implicit_reexport", "keep_going", "prefix",
@@ -160,6 +171,11 @@ def check(text: str) -> tuple[list[str], list[str]]:
             dd = data["docs"]
             info.append(f"docs: {len(dd['include'])} include glob(s), {len(dd.get('records', []))} record "
                         f"glob(s), anchors {dd.get('anchors', 'warn')}, docstrings {dd.get('docstrings', False)}")
+    if ZONES_KEY in data:
+        from .zones import check_config as zones_check  # noqa: PLC0415 (zones imports config)
+        zones_info, zones_bad = zones_check(data[ZONES_KEY])
+        info += zones_info
+        bad += zones_bad
     if isinstance(data.get("profiles"), dict) and "cpp" in data["profiles"]:
         info += [f"WARNING [gate] {k} = true is not checked for C++ files (Python only; the check "
                  f"passes and says 'not checked')" for k in ("public_api", "literals") if gate.get(k)]

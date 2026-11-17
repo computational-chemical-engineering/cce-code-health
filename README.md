@@ -37,7 +37,32 @@ profiles, config, repo, ref, schema}; `totals` {files, functions, nloc, debt, de
 health, functions_with_debt, brain_functions, file_smells, errors}; `files`, an object keyed by
 path, each {path, nloc, error, debt, file_smells, dup_fraction, health, functions, classes, ...};
 `functions` a list of {name, qualname, line, end_line, nloc, <profile metrics>, debt, debt_parts,
-brain}; `groups` (with `--group-depth`) an object keyed by prefix with the `totals` fields.
+brain}; `groups` (with `--group-depth`) an object keyed by prefix with the `totals` fields;
+`zones` (with `[[zones]]`) an object keyed by zone, and `zone` on every file and function record.
+
+**Zones** report debt per layer of a repo (for example user-facing, device and host code); they
+never change pass/fail, and without them every output is unchanged. Each `[[zones]]` entry is a
+rule with a `name` and optional `paths` (globs as in `[scope]`; absent = every file). Rules are
+ordered, the first whose paths match a file gives its zone, several rules may share a name, and a
+file no rule matches is in zone `-` (shown, never dropped; `config --check` warns when no rule is
+a catch-all). A function is in its file's zone (function-level markers are planned).
+
+```toml
+[[zones]]
+name = "user"
+paths = ["**/*.py", "bindings/*.cpp"]
+[[zones]]
+name = "device"
+paths = ["src/*_kernels.hpp"]
+[[zones]]
+name = "host"            # catch-all
+```
+
+`scan` prints a table per zone: files, NLOC, health and file smells from the files in the zone;
+functions, their NLOC (`fn_nloc`), debt, debt per kNLOC over `fn_nloc`, functions with debt and
+brain functions from the functions in the zone. `diff` adds a row per zone (debt over the touched
+files before and after, new brain functions) and a JSON `zones`; the gate's `debt` detail adds
+one `zones` line.
 
 **Debt** is the quantity that is gated: per function, the weighted excess over thresholds
 for cognitive complexity, lines of code, nesting, bumpy road, parameters and boolean
