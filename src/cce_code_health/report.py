@@ -6,7 +6,8 @@ from .python_backend import FileMetrics, FunctionMetrics
 
 # Display score only (same recipe as the 2026-11-11 prototype baseline).
 _DISPLAY_PENALTY = {"complex": (0.5, 2.0), "brain": (1.0, 3.0), "long": (0.3, 1.5),
-                    "deep_nesting": (0.5, 2.0), "bumpy_road": (0.5, 1.5), "many_args": (0.2, 1.0)}
+                    "deep_nesting": (0.5, 2.0), "bumpy_road": (0.5, 1.5), "many_args": (0.2, 1.0),
+                    "many_captures": (0.2, 1.0)}
 
 
 def allowed(allows, metric: str) -> bool:
@@ -41,7 +42,8 @@ def _display_smells(fn: FunctionMetrics, p: Profile) -> list[str]:
         ("brain", is_brain(fn, p)), ("complex", fn.value(bm) > t[bm]),
         ("long", fn.nloc > t["nloc"]), ("deep_nesting", fn.nesting > t["nesting"]),
         ("bumpy_road", "bumps" in p.metrics and fn.bumps > t["bumps"]),
-        ("many_args", fn.params > t["params"])) if hit]
+        ("many_args", fn.params > t["params"]),
+        ("many_captures", "captures" in p.metrics and fn.value("captures") > t["captures"])) if hit]
 
 
 def file_report(fm: FileMetrics, dup_lines: int, p: Profile) -> dict:

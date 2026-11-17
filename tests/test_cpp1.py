@@ -152,8 +152,9 @@ def test_branch_selection_review_cases(src, kept):
 
 
 def test_cpp1_does_not_share_cpp0_tables():
-    assert CPP1.thresholds == CPP0.thresholds and CPP1.thresholds is not CPP0.thresholds
-    assert CPP1.weights == CPP0.weights and CPP1.weights is not CPP0.weights
+    assert CPP1.thresholds == dict(CPP0.thresholds, captures=8) and "captures" not in CPP0.thresholds
+    assert CPP1.weights == dict(CPP0.weights, captures=0.5) and "captures" not in CPP0.weights
+    assert CPP0.metrics == ("ccn", "nloc", "nesting", "params")
     assert CPP0.cpp_rules == frozenset()
 
 
@@ -336,3 +337,114 @@ def test_mismatched_brackets_are_not_paired():
     from cce_code_health.cpp_kernels import code_tokens, find_kernels
     toks = code_tokens("f(KOKKOS_LAMBDA(int i) { g(i]; });")
     assert find_kernels(toks, {"KOKKOS_LAMBDA"}, set()) == []
+
+
+# cpp@1 rule (4): captures (docs/CPP1_LAYERS.md; F6 in docs/cpp1/f1.cpp)
+
+
+def test_f6_captures():
+    f = fns(F5, CPP1)
+    assert f["s::k"].captures == 3              # [a, &b, c = 2 * n]
+    assert f["s::k2"].captures == 4             # KOKKOS_LAMBDA ([=]) using a, dt, b, n
+    assert f["s"].captures == 0
+
+
+def test_captures_of_nested_and_class_lambdas():
+    f = fns(MULTI, CPP1)
+    assert f["ns::run::outer"].captures == 2               # p, n (m and j are its own)
+    assert f["ns::run::outer::lambda#1"].captures == 0     # [&] using only its parameter
+    assert f["ns::run::lambda#1"].captures == 1            # KOKKOS_CLASS_LAMBDA: this
+    assert f["ns::run::lambda#2"].captures == 1            # p
+
+
+CAPS = """\
+struct S { int m; };
+void t(View a, View b, S s, int n, int k) {
+  int loc = 3;
+  Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) { s.m = a(i) + ns::b + n::x + i; });
+  Kokkos::parallel_for(n, [&, a](int i) { int k = 1; a(i) = b(i) + k + loc; });
+  Kokkos::parallel_for(n, [=, *this](int i) { a(i) = b(i); });
+  Kokkos::parallel_for(n, [this](int i) { m = i; });
+}
+"""
+
+
+def test_declared_heuristic():
+    from cce_code_health.cpp_kernels import code_tokens, declared
+    t = code_tokens("if (j && n) a->g(x); auto&& r = 1; for (const auto& e : v) {} T* q = 0; "
+                    "if (i > m) f(a * b, c); std::vector<int> w; ns::h(y);")
+    assert declared(t, 0, len(t)) == {"r", "e", "q", "w"}
+
+
+def test_capture_rules():
+    f = fns(CAPS, CPP1)
+    # names after . -> :: and before :: are not captures; s and a are
+    assert f["t::lambda#1"].captures == 2
+    # explicit a once, plus b and loc by default; the body's own k is not a capture
+    assert f["t::lambda#2"].captures == 3
+    assert f["t::lambda#3"].captures == 3      # *this, plus a and b by default
+    assert f["t::lambda#4"].captures == 1      # this; an implicit member is not seen
+
+
+def _wide(n):
+    names = [f"v{j}" for j in range(n)]
+    sig = ", ".join(f"int {v}" for v in names)
+    return f"void w({sig}) {{\n  Kokkos::parallel_for(1, KOKKOS_LAMBDA(int i) {{ g({', '.join(names)}); }});\n}}\n"
+
+
+def test_captures_debt_only_in_cpp1():
+    from cce_code_health.report import file_report
+    rep = file_report(analyze("f.cpp", _wide(10), CPP1), 0, CPP1)
+    lam = next(f for f in rep["functions"] if f["name"] == "w::lambda#1")
+    assert (lam["captures"], lam["debt_parts"]) == (10, {"captures": 1.0})
+    assert next(f for f in rep["functions"] if f["name"] == "w")["captures"] == 0
+    assert all("captures" not in f for f in file_report(analyze("f.cpp", _wide(10), CPP0), 0, CPP0)["functions"])
+    rep8 = file_report(analyze("f.cpp", _wide(8), CPP1), 0, CPP1)
+    assert all("captures" not in f["debt_parts"] for f in rep8["functions"])
+
+
+def test_captures_suppression():
+    from cce_code_health.report import file_report
+    src = _wide(10).replace("  Kokkos", "  // codehealth: allow captures -- views of one cell\n  Kokkos")
+    rep = file_report(analyze("f.cpp", src, CPP1), 0, CPP1)
+    lam = next(f for f in rep["functions"] if f["name"] == "w::lambda#1")
+    assert (lam["captures"], lam["debt_parts"]) == (10, {})
+
+
+def _caps(body, sig="View a, View b, View y, View x, double dt, double tol, int flag, View mask, double c"):
+    src = f"void t({sig}) {{\n  double* p = 0;\n  Kokkos::parallel_for(1, KOKKOS_LAMBDA(int i) {{ {body} }});\n}}\n"
+    return fns(src, CPP1)["t::lambda#1"].captures
+
+
+@pytest.mark.parametrize("body,n", [
+    ("y(i) = x(i) * dt;", 3),                       # dt after * is a use, not a declaration
+    ("if (i > 0 && mask[i]) a(i) = 1;", 2),
+    ("if (i > 0 && flag == 1) a(i) = 1;", 2),
+    ("bool q = a(i) > tol;", 2),
+    ("*p = a(i);", 2),
+    ("a(i) = i > 0 ? b(i) * c : 0;", 3),
+])
+def test_operands_are_not_declarations(body, n):
+    assert _caps(body) == n
+
+
+def test_local_views_and_nested_kernel_params():
+    src = """\
+void t(int n) {
+  Kokkos::View<double*> u("u", n);
+  Kokkos::View<double*> v("v", n);
+  Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) { u(i) = v(i); });
+  Kokkos::parallel_for("team", policy, KOKKOS_LAMBDA(const member_type& team) {
+    const int r = team.league_rank();
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n), [&](const int j) {
+      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, n), [&](const int k) { u(r) += team.team_rank() + k; });
+      v(j) = r;
+    });
+  });
+}
+"""
+    f = fns(src, CPP1)
+    assert f["t::lambda#1"].captures == 2                    # local views u, v
+    assert f["t::team"].captures == 3                        # n, u, v
+    assert f["t::team::lambda#1"].captures == 5              # team, n, r, v, and u from inside
+    assert f["t::team::lambda#1::lambda#1"].captures == 3    # team (two kernels up), u, r

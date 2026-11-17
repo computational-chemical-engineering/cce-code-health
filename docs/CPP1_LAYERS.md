@@ -111,12 +111,36 @@ unchanged in all 263 C++ files; per zone (zones trial config, cpp@1 without capt
   because the head scan stops at the first `{` on a launch line (`MD({0,0},{n,n}), KOKKOS_LAMBDA`).
 - The lambda is scored on its original lines (the prototype pulled the body up to the head line:
   one or two NLOC less for a `{` or specifiers on their own line).
+
 Open notes (review): new brains are matched on the bare name across files (gate.py:1430,
 cli.py:169, zones.py:144), so a repeated `run::lambda#1` elsewhere can hide a new brain; matching
 on qualname would be stricter. A short `--target path::compute` can be ambiguous when a Kokkos
 label repeats the parent's name. Adding an unlabelled kernel above others renumbers `lambda#k`
 (advise labels). cpp@0 suppressions on a parent's head do not cover its lambdas. A lambda's head
 scan also crosses a braceless `for (...)` line above the launch (suppression slightly wider).
+
+Rule (4) as shipped (src/cce_code_health/cpp_kernels.py `captures`, `declared`, `outer_names`;
+2026-11-17; Peclet nine repos cpp@1 9163.7 -> 9678.2, captures debt 514.5, brains 62 unchanged;
+1302 kernel lambdas, captures median 4, p90 11, max 28, 228 above 8; cpp@0 byte-identical; sums of
+CCN - 1 and NLOC conserved in all 263 files). After a think review:
+- The metric is the capture count alone (> 8, w0.5), as written above. The prototype's debt
+  function charged params + captures > 8 (Peclet: 958.5 instead of 514.5, total 10122.2; the
+  10094.4 above used it). Not taken: a frozen metric must be the number it reports, kernel params
+  are set by the launch policy (1 for a range, 2 for a reduce), and params have their own charge.
+- The tokenizer splits `->`, `::` and `&&`, so the checks look two tokens back.
+- `declared` after `*`, `&` or `>` needs a type before the run that starts a statement or a
+  parameter (after `; { } ( ,`, `::` qualifiers and const/static/... skipped; `>` must close a
+  `word<`) and one of `=` (not `==`), `;`, `{`, `:` next, or `(` right after `>` (local
+  `View<double*> u("u", n)`). Operands such as `x(i) * dt;`, `i > 0 && mask[i]`, `a(i) > tol;`
+  stay uses. Parameter lists come from lizard.
+- An enclosing kernel's parameters count as names of the enclosing function (team, thread,
+  vector nests).
+- A name the capture list names explicitly is not counted again as an implicit use.
+- `this`-capturing macros are profile data (`kernel_this_macros`); display smell `many_captures`
+  (cpp@1 only); `allow captures` is a valid suppression only under a profile with the metric.
+- Known edge cases: `[...xs = f(xs)]` does not list xs; a comma inside template arguments of an
+  init-capture splits the entry; `i-- > n` reads as `->`.
+- Only cpp@1 lists `captures` in its metrics, so cpp@0 output carries no new key.
 
 ## Falsifiers (docs/cpp1/f1.cpp; expected numbers)
 

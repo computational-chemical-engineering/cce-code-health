@@ -49,6 +49,7 @@ class CppFunctionMetrics:
     params: int
     allows: list = field(default_factory=list)
     introducer: str | None = None   # cpp@1 kernel lambda: its macro (zone marker), if any
+    captures: int = 0               # cpp@1 kernel lambda: captured names (cpp_kernels.captures)
 
     def value(self, metric: str) -> int:
         return getattr(self, metric)
@@ -249,7 +250,7 @@ def _split(lizard, path: str, texts: tuple, info, profile, opts: tuple, lines, a
     if not ks:
         return unsplit
     try:
-        out = _split_records(lizard, path, texts, (toks, ks, info), opts, lines, allows)
+        out = _split_records(lizard, path, texts, (toks, ks, info), (opts, profile), lines, allows)
     except Exception:  # noqa: BLE001 (lizard raises various errors on odd input)
         out = None
     if out is None or sum(r.ccn - 1 for r in out) != sum(r.ccn - 1 for r in unsplit):
@@ -257,31 +258,38 @@ def _split(lizard, path: str, texts: tuple, info, profile, opts: tuple, lines, a
     return out
 
 
-def _split_records(lizard, path: str, texts: tuple, found: tuple, opts, lines, allows):
+def _split_records(lizard, path: str, texts: tuple, found: tuple, settings, lines, allows):
     """Records of the split, or None if a kernel lost its parent or its lizard function.
     NLOC: each function keeps its whole NLOC minus that of its direct kernel lambdas, so
     the file's sum of function NLOC is the unsplit one (a launch line is not counted twice)."""
     from . import cpp_kernels  # noqa: PLC0415 (import cycle)
     source, shown, measured = texts
     toks, ks, info = found
+    opts, profile = settings
     ranges = [cpp_kernels.body_range(toks, k) for k in ks]
     parents = _run(lizard, path, cpp_kernels.blank(measured, ranges)).function_list
     out = _records(parents, cpp_kernels.blank(shown, ranges), opts, lines, allows)
     whole = {(f.start_line, f.end_line): f.nloc for f in info.function_list}
     keys = {(r.name, r.line, r.end): r for r in out}
+    params = {(r.name, r.line, r.end): set(f.parameters) for f, r in zip(parents, out)}
     lams = cpp_kernels.lambdas(source, shown, measured, toks, ks, list(keys))
     if lams is None or any((r.line, r.end) not in whole for r in out):
         return None
     full = {id(r): whole[(r.line, r.end)] for r in out}       # whole NLOC per record
     taken = {id(r): 0 for r in out}                             # NLOC of direct lambdas
-    named = {}
-    for lam in lams:
+    named, lparams = {}, {}      # lparams: each kernel's own parameter names (rule 4)
+    for k, lam in zip(ks, lams):
         fl = _run(lizard, path, lam.text).function_list
         if not fl:
             return None
         body = [t for _, t in tokens(lam.body)[0]][1:-1]
         rec = _record(fl[0], nesting_depth(body, *opts), lines, allows, name=lam.name, line=lam.line)
         rec.introducer = lam.introducer
+        lparams[k] = set(fl[0].parameters)
+        outer = cpp_kernels.outer_names(toks, k, list(keys), params)
+        outer |= set().union(*(lparams[o] for o in ks if cpp_kernels.inside(k, o)))
+        rec.captures = cpp_kernels.captures(toks, k, outer, lparams[k],
+                                            frozenset(profile.kernel_this_macros))
         full[id(rec)] = _run(lizard, path, lam.full).function_list[0].nloc if lam.full else rec.nloc
         taken[id(rec)] = 0
         parent = keys[lam.parent[1]] if lam.parent[0] == "fn" else named[lam.parent[1]]
@@ -299,7 +307,7 @@ def analyze(path: str, source: str, profile=None) -> FileMetrics:
     "kernels" rule, kernel lambdas are functions of their own (cpp_kernels). Lines, head
     lines and suppressions always come from the source, which the views keep aligned."""
     lizard = _lizard()
-    allows = parse_allows(source, ALLOW_RE, SMELL_NAMES)
+    allows = parse_allows(source, ALLOW_RE, SMELL_NAMES | frozenset(profile.metrics if profile else ()))
     rules = profile.cpp_rules if profile is not None else frozenset()
     opts = ("preprocess" in rules, "loop_credit" in rules)
     shown = measured = source

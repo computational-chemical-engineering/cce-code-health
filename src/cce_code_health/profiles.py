@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 # Function metrics that carry debt, in report order (Python; each profile names its own).
 METRICS = ("cognitive", "nloc", "nesting", "bumps", "params", "boolops")
 CPP_METRICS = ("ccn", "nloc", "nesting", "params")
+CPP1_METRICS = CPP_METRICS + ("captures",)    # captures: kernel lambdas only (cpp@1 rule 4)
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,8 @@ class Profile:
     # these calls, are scored as functions of their own (cpp_kernels).
     kernel_macros: tuple = ()
     kernel_calls: tuple = ()
+    # cpp@1 rule (4): kernel macros whose lambda captures *this (one capture).
+    kernel_this_macros: tuple = ()
 
 
 PROFILES = {
@@ -66,12 +69,14 @@ PROFILES = {
     ),
 }
 # In development, not frozen: rules are added one by one (docs/CPP1_LAYERS.md) and the
-# profile is released only after a Peclet run. Thresholds and weights of cpp@0 so far.
+# profile is released only after a Peclet run. Thresholds and weights of cpp@0, plus captures
+# (> 8, weight 0.5; the capture count alone, params are charged on their own).
 _CPP0 = PROFILES["cpp@0"]
 PROFILES["cpp@1"] = replace(
-    _CPP0, name="cpp@1", thresholds=dict(_CPP0.thresholds), weights=dict(_CPP0.weights),
+    _CPP0, name="cpp@1", metrics=CPP1_METRICS,
+    thresholds=dict(_CPP0.thresholds, captures=8), weights=dict(_CPP0.weights, captures=0.5),
     cpp_rules=frozenset({"preprocess", "loop_credit", "kernels"}),
-    kernel_macros=("KOKKOS_LAMBDA", "KOKKOS_CLASS_LAMBDA"),
+    kernel_macros=("KOKKOS_LAMBDA", "KOKKOS_CLASS_LAMBDA"), kernel_this_macros=("KOKKOS_CLASS_LAMBDA",),
     kernel_calls=("parallel_for", "parallel_reduce", "parallel_scan"))
 
 

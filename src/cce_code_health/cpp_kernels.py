@@ -11,15 +11,39 @@ A lambda is named `<enclosing>::<label>` when the call it is passed to starts wi
 literal (the Kokkos label), else `<enclosing>::lambda#<k>` (k counts the enclosing function's
 unlabelled kernels from 1); a repeated name gets `#2`, `#3`. Never a line number: the gate
 matches brain functions by name. Design: docs/CPP1_LAYERS.md, rule (3).
+
+Rule (4), captures: the explicit entries of the capture list (`this` and `*this` count one),
+plus, with a default capture (`[=]`, `[&]`, every kernel macro), the names the body uses that
+are parameters or earlier locals of the enclosing function and are not listed explicitly,
+not the lambda's parameters or the body's own locals, and not after `.`, `->` or `::` or
+before `::`. The names of enclosing kernels' parameters count as the enclosing function's.
+A macro in the profile's kernel_this_macros (KOKKOS_CLASS_LAMBDA) captures `*this` too. Locals are found by a token heuristic
+(`declared`): `x * y(` reads as a declaration, members reached through an implicit this are
+not seen.
 """
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from .cpp_backend import _TOKEN
 
 MAX_SPECIFIERS = 12
+_KEYWORDS = frozenset("""alignas alignof and asm auto bool break case catch char class const constexpr
+const_cast continue decltype default delete do double else enum explicit extern false float for
+friend goto if inline int long mutable namespace new noexcept not nullptr operator or private
+protected public return short signed sizeof static static_assert static_cast struct switch template
+this throw true try typedef typeid typename union unsigned using virtual void volatile while
+size_t""".split())
+_NOT_DECL_AFTER = frozenset({"return", "else", "case", "goto", "throw", "new", "delete", "co_return",
+                             "typedef", "using", "do"})
+_DECL_BEFORE = frozenset({"=", ";", "(", "{", ",", ":", "[", ")"})
+_WORD = re.compile(r"[A-Za-z_]\w*$")
+_TYPE_STOP = frozenset({";", "{", "}", "(", ")", "="})        # a template scan stops here
+_STMT_OPEN = frozenset({";", "{", "}", "(", ","})             # a declaration's type follows these
+_QUALIFIERS = frozenset({"const", "constexpr", "static", "volatile", "typename", "inline",
+                         "thread_local", "register"})
 _CLOSE = {")": "(", "]": "[", "}": "{"}
 
 
@@ -223,3 +247,120 @@ def lambdas(source: str, shown: str, measured: str, toks: list[Tok], ks: list[Ke
         out.append(Lambda(name, toks[k.intro].line, synthetic(measured, toks, k, inner),
                           synthetic(measured, toks, k, []) if inner else "", body, key, macros[k]))
     return out
+
+
+def _pair2(toks: list[Tok], i: int, a: str, b: str) -> bool:
+    """Whether toks[i], toks[i + 1] are `a`, `b` (the tokenizer splits -> and ::)."""
+    return 0 <= i and i + 1 < len(toks) and toks[i].text == a and toks[i + 1].text == b
+
+
+def _type_start(toks: list[Tok], j: int) -> int | None:
+    """If toks[j] ends a type (a word, or the `>` of `word<...>`), the index where the type
+    starts (`::` qualifiers and const, static, ... included), else None."""
+    if toks[j].text == ">":
+        depth = 0
+        while j >= 0 and toks[j].text not in _TYPE_STOP:
+            depth += (toks[j].text == ">") - (toks[j].text == "<")
+            if depth == 0:
+                break
+            j -= 1
+        if j < 1 or toks[j].text != "<" or not _WORD.match(toks[j - 1].text):
+            return None
+        j -= 1
+    if not _WORD.match(toks[j].text) or toks[j].text in _NOT_DECL_AFTER:
+        return None
+    while j >= 3 and _pair2(toks, j - 2, ":", ":") and _WORD.match(toks[j - 3].text):
+        j -= 3
+    while j >= 1 and toks[j - 1].text in _QUALIFIERS:
+        j -= 1
+    return j
+
+
+def declared(toks: list[Tok], a: int, b: int) -> set[str]:
+    """Names that look declared in toks[a:b]: a word after a type-like word (not a keyword
+    such as return) and before one of = ; ( { , : [ ); or a word after a type and a run of
+    * & (or after the `>` of `word<...>`) where the type starts a statement or a parameter
+    (after ; { } ( ,) and the word is followed by `=` (not `==`), `;`, `{`, `:` (or `(`
+    right after `>`). Lizard gives the parameter lists of functions and lambdas."""
+    names = set()
+    for k in range(max(a, 1), min(b, len(toks) - 1)):
+        t, prev, nxt = toks[k].text, toks[k - 1].text, toks[k + 1].text
+        if not _WORD.match(t) or t in _KEYWORDS or nxt not in _DECL_BEFORE:
+            continue
+        if _pair2(toks, k + 1, ":", ":"):
+            continue
+        if prev in (">", "*", "&"):
+            if _pointer_decl(toks, k):
+                names.add(t)
+        elif _WORD.match(prev) and prev not in _NOT_DECL_AFTER:
+            names.add(t)
+    return names
+
+
+def _pointer_decl(toks: list[Tok], k: int) -> bool:
+    """`T* x = `, `auto&& x : `, `View<double*> x(`; not `a * dt;`, `i > n)`, `x && m[`."""
+    nxt = toks[k + 1].text
+    if nxt == "=" and k + 2 < len(toks) and toks[k + 2].text == "=":
+        return False
+    if nxt not in ("=", ";", "{", ":") and not (nxt == "(" and toks[k - 1].text == ">"):
+        return False
+    j = k - 1
+    while j > 0 and toks[j].text in ("*", "&"):
+        j -= 1
+    if toks[j].text == ">" and _pair2(toks, j - 1, "-", ">"):
+        return False
+    start = _type_start(toks, j)
+    return start is not None and (start == 0 or toks[start - 1].text in _STMT_OPEN)
+
+
+def outer_names(toks: list[Tok], k: Kernel, functions: list[tuple[str, int, int]],
+                params: dict) -> set[str]:
+    """Names a default capture can take: the parameters (`params`, keyed like `functions`) and
+    the earlier locals of the function that holds the kernel."""
+    fn = _enclosing(toks[k.intro].line, functions)
+    if fn is None:
+        return set()
+    start = bisect_left([t.line for t in toks], fn[1])
+    return set(params.get(fn, ())) | declared(toks, start, k.intro)
+
+
+def _entries(toks: list[Tok], a: int, b: int) -> list[list[str]]:
+    """The comma-separated entries of the capture list toks[a] = '[' ... toks[b] = ']'."""
+    out, cur, depth = [], [], 0
+    for t in toks[a + 1:b]:
+        if t.text == "," and depth == 0:
+            out.append(cur)
+            cur = []
+            continue
+        depth += (t.text in "([{") - (t.text in ")]}")
+        cur.append(t.text)
+    return [e for e in out + [cur] if e]
+
+
+def captures(toks: list[Tok], k: Kernel, outer: set[str], params: set[str],
+             this_macros=frozenset()) -> int:
+    """Rule (4): the number of names kernel `k` captures (module docstring)."""
+    explicit, listed, default = 0, set(), k.macro is not None
+    if k.macro is None:
+        pair, _ = _partners(toks[k.intro:k.body[0]])
+        for e in _entries(toks, k.intro, k.intro + pair[0]):
+            if e in (["&"], ["="]):
+                default = True
+                continue
+            explicit += 1
+            listed |= {w for w in e[:2] if _WORD.match(w) and w != "this"}
+    elif k.macro in this_macros:
+        explicit = 1
+    if not default:
+        return explicit
+    bo, bc = k.body
+    own = params | declared(toks, bo, bc + 1) | listed
+    used = set()
+    for j in range(bo + 1, bc):
+        t = toks[j].text
+        if t not in outer or t in own or _pair2(toks, j + 1, ":", ":"):
+            continue
+        if toks[j - 1].text == "." or _pair2(toks, j - 2, ":", ":") or _pair2(toks, j - 2, "-", ">"):
+            continue
+        used.add(t)
+    return explicit + len(used)

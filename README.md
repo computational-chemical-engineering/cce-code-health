@@ -153,13 +153,13 @@ Python: large above 1000 NLOC, huge above 2000, duplication above 10 % (8-line w
 comments, import statements, `__all__` declarations and Python docstrings ignored, multi-line name
 lists included). Names are qualified (`ns::Class::method`, no parameter list); lambdas count
 towards the enclosing function. Captures are not counted: a lambda that captures the caller's
-locals by reference (`[&]`) is as coupled as a long parameter list, but scores none of it. Nesting is computed by codehealth, not lizard: if, for, while,
+locals by reference (`[&]`) is as coupled as a long parameter list, but scores none of it (cpp@1 rule 4 counts them, below). Nesting is computed by codehealth, not lizard: if, for, while,
 do, switch and try open a level, braced or not; `else if`, else and catch do not. Suppressions
 use `// codehealth: allow ccn,nesting -- reason` on the line above the declaration (above its
 `template` line, if any) or on the lines up to its opening brace, and `allow-file`.
 
 Profile `cpp@1` is in development (not frozen; released only after a Peclet run; design in
-docs/CPP1_LAYERS.md). It has the thresholds and weights of `cpp@0` and measures a preprocessed
+docs/CPP1_LAYERS.md). It has the thresholds and weights of `cpp@0`, plus the metric `captures`, and measures a preprocessed
 view of each file. Rule (1), in place: of every `#if`/`#ifdef`/`#ifndef` group one branch is
 measured (`#if 0`, `#if false` and `#elif 0` are dead; after `#if 1` the later branches are dead;
 of the live branches the one with the most decisions, ties to the first, unless its brace balance
@@ -175,7 +175,14 @@ string label (else `<enclosing>::lambda#1`, `#2`, ...); the enclosing function n
 its body (CCN, NLOC, nesting). A lambda can be a brain function. A suppression for it goes on
 the line above the launch statement or on the lines up to the lambda's `{`; its zone is read
 from that head, so `KOKKOS_LAMBDA` can be a zone marker. Lines and suppressions refer to the
-source as written. Rule still to come: captures.
+source as written. Rule (4), in place: a kernel lambda carries the metric `captures` (above 8,
+weight 0.5; other functions have 0): the entries of its capture list (`this` and `*this` count
+one), plus, with a default capture (`[=]`, `[&]`, and every kernel macro), the parameters and
+earlier locals of the enclosing function (and the parameters of enclosing kernels) that its
+body uses and the list does not name.
+`KOKKOS_CLASS_LAMBDA` captures `*this` too. Names after `.`, `->` or `::` are not captures;
+members reached through an implicit `this` are not seen. Over 8 it shows the display smell
+`many_captures`. Suppress with `allow captures`.
 
 `scan`, `diff`, `hotspots` and the gate's debt check cover C++ files. The gate's static rules
 `literals` and `public_api` and the self-test's literal mutation are Python-only: C++ static
