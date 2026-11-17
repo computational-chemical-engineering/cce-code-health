@@ -42,10 +42,8 @@ Added by the think design pass 2026-11-17 (docs/py1/design.md; prototype numbers
 
 ## Position
 
-2026-11-17: python@1 MERGED to main (ffc4a30, branch py1 no-squash; review fixes a72885e). All gates pass
-(G4' weak on a strict reading, see below). Next: tell pymrm-health the pin commit (c2 starts); worktree
-~/Code/cce-code-health-py1 can be removed. Release v0.4.0 needs a Desk card (not filed yet).
-python@1 is frozen from the moment an adopter pins it: any change needs python@2.
+CLOSED 2026-11-18: v0.4.0 tagged at 6f5bc28 (Desk cce-v040-release B VERIFIED). pymrm c2's first 5
+steps on python@1 needed no tool fix (_NewtonRun 54 -> 11). python@1 is frozen; changes go to python@2.
 
 ## Gate results (orchestrator, 2026-11-17, py1 at aa2f95e)
 

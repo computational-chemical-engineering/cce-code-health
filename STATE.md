@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-17)
 
-- Tagged v0.3.0 2026-11-17 at a2c3829 (plugin 0.3.0; cpp@1 frozen, captures > 12; zones). python@1 merged 2026-11-17 at ffc4a30 (main 297af5b+, 543 tests).
+- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 543 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -25,7 +25,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-python@1 campaign: see docs/PY1_STATE.md (read it after this file).
+python@1 campaign closed (docs/PY1_STATE.md is history).
 Campaign cpp@1 + zones CLOSED: v0.3.0 tagged 2026-11-17 at a2c3829 (Desk card cce-v030-release VERIFIED A,
 executed). cpp@1 is frozen (any change needs cpp@2). Peclet sent the v0.3.0 pin; it switches its gate
 from cpp@0 (719092b) to cpp@1 when it chooses. Work is reactive again (adopter reports).
@@ -45,13 +45,9 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- python@1 campaign: merged ffc4a30, all gates pass; pymrm-health pinned it, c2 started 2026-11-17 (CB2 d7c4650; its C2_STATE.md in pymrm-health-notes). First 5 c2 steps (S1-S5 on _NewtonRun, 54 -> 11) needed no tool fix: card B condition met 2026-11-18; card still unsigned (hub told). Next c2: S6 interface mode with literals_removed-only plan.
-  Release v0.4.0: Desk card cce-v040-release filed by hub (rec B). Exact action texts for the verifier:
-  A "tag v0.4.0 at the current main of cce-code-health now and push the tag"
-  B "tag v0.4.0 of cce-code-health after pymrm campaign c2 has run its first steps on python@1 without a tool fix, at the main commit at that time, and push the tag"
-  C "do not tag v0.4.0 yet"
-  Before tagging: bump plugin version to 0.4.0 as for v0.3.0 (see that release commit), then tag.
-  Position and gates: docs/PY1_STATE.md. A change to python@1 now needs python@2.
+- python@1 campaign CLOSED: v0.4.0 tagged 6f5bc28 (Desk cce-v040-release B VERIFIED, executed).
+  pymrm c2 runs on it (pinned ffc4a30, same code). Reports from c2 (next: S6 interface mode with a
+  literals_removed-only plan) are ordinary reactive work; any scoring change needs python@2.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
