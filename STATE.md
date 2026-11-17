@@ -10,12 +10,12 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-16)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at d23326b, 410 tests.
+- Tagged v0.2.0 (plugin 0.2.0). main at cf15245, 416 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
-  - OpenFlowsheet S19 (repo-wide, W4 interface lane): re-pins to d23326b for I-12a (text
-    callers follow `from M import` moves); `[gate] no_implicit_reexport` set. Nothing open.
+  - OpenFlowsheet S19 (repo-wide, W4 interface lane): re-pins to cf15245 for I-12a/I-12c (text
+    callers follow `from M import` moves; private names may be renamed); `[gate] no_implicit_reexport` set. Nothing open.
   - pymrm c1 closed locally (debt 1282.8 -> 80.0, health 5.82 -> 9.57); its push waits
     for a Desk sign-off. Its trial-config report fixed in cc00407. Nothing open.
   - Peclet (dem landed, flow F1-F3): re-pins @v0.2.0; builds and tests on TRS2 run only
