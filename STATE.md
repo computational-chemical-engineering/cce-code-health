@@ -52,6 +52,11 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
   short-block duplication, docstrings out of size, validate vs CodeScene + blind reviews, playbook
   anti-pattern "extract method communicating through new mutable fields". On A: think design pass first.
   pymrm-health tells us when c2 (solve.py) starts.
+  Card filed by hub; exact action texts (verify with decision_desk_verify.py --action "<text>"):
+  A "start the codehealth python@1 profile design and implementation now, with docstring lines excluded from function and file size"
+  B "start the codehealth python@1 profile design and implementation now, with docstring lines counted in function and file size"
+  C "start the codehealth python@1 profile after pymrm campaign c2 has run"
+  D "keep python@1 on later"   (rec A)
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
