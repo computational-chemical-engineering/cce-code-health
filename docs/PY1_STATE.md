@@ -26,9 +26,25 @@ Input: pymrm-health recommendation (2026-11-17) and data in
 | G5 | docstring lines count in neither function nloc nor file nloc (tests) | already true for python@0 |
 Gates the design pass adds are appended below, before their runs.
 
+Added by the think design pass 2026-11-17 (docs/py1/design.md; prototype numbers in docs/py1/proto/):
+
+| gate | criterion | python@0 reference |
+|---|---|---|
+| G6 | bumpy road, OFS a9e733e4, all Python files with a CodeScene score: functions with bumps >= 2 within 10 % of CodeScene's 1088 (979..1197) and per-file sum abs diff <= 420 | 562 functions, sum abs diff 530 (prototype 1105, 383) |
+| G7 | complex conditional, same files: functions with boolops >= 2 vs CodeScene Complex Conditional, per-file sum abs diff <= 150 | 579 (prototype 120) |
+| G8 | ratchet tests: (a) a step extracting helpers that communicate through 2 new self fields fails debt_check with "class state rose" although debt falls; (b) the same with an allow comment on the helper still fails; (c) moving __init__ code into a private helper called only from __init__ passes; (d) turning a channel into a local or a returned NamedTuple passes and lowers state_writes; (e) (a) in optimize mode gives a note, not an error | n/a |
+| G9 | clones: solve.py @230bbc3 groups cover 662-665/703-706 and 693-696/865-869; OFS src files with clones <= 50 of 277 | prototype 42 |
+| G10 | formatting stability: after reformatting pymrm src with ruff format at line length 60 and 120, every python@1 metric except nloc is identical per function (0 differences) | n/a |
+| G11 | Goodhart replay: re-gate each accepted pymrm c1 step (debt check only) under python@1: >= 1 step fails on class state, and each failing step's diff shows new self fields that methods use to communicate | n/a |
+| G12 | cost: python@1 scan wall time on OFS a9e733e4 <= 1.5 x python@0 | measure python@0 first |
+| G4' | blind reviewer (flags hidden) rates 20 classes: all flagged + highest unflagged by state_writes, shuffled. Pass: >= 5 of 6 flagged rated real shared-state cost, <= 3 unflagged rated so with high severity. Replaces G4 (decided 2026-11-17 before any run) | n/a |
+| G4 note | G4 cannot run as written: 6 classes exceed the flag (state_writes > 8) across five local repos. Proposed G4' in docs/py1/design.md section 8; the orchestrator or user decides | n/a |
+
 ## Position
 
-2026-11-17: campaign opened. Next: think design pass (brief docs/briefs/py1-design.md).
+2026-11-17: design adopted (docs/py1/design.md, decisions logged). Next: implement in worktree
+~/Code/cce-code-health-py1 (branch py1), brief docs/briefs/py1-implement.md; then G0, G5..G12, then
+G1..G4' on the frozen candidate commit.
 
 Consumer: pymrm c2 starts as soon as python@1 is pinnable (send pymrm-health the commit). Order
 numjac.py, coupling.py, convect.py, then solve.py _NewtonRun (PR #48 merged as pymrm 13176bb; run G3 on that commit). c2 needs:
@@ -38,4 +54,7 @@ as a file/class smell the gate checks).
 
 ## Open decisions (default in force until changed)
 
-- none yet
+- Allow-comment loophole (found by think): the gate does not refuse new `# codehealth: allow` comments
+  in a step, so a loop can suppress function debt. Proposed rule: valid allows over touched files may
+  not rise in refactor mode. Affects every profile and adopter, so NOT in this campaign by default;
+  raise with adopters after python@1 ships. The class-state ratchet counts raw values regardless.
