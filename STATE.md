@@ -44,10 +44,14 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- pymrm-health (2026-11-17): CodeScene scores pymrm solve.py 4.70, python@0 says 9.4 (debt 25, params only).
-  It runs a blind review and will recommend (likely python@1 calibrated per file). Acked: python@0 frozen,
-  python@1 queue (LCOM4, complexipy 9, nesting/conditional terms); priority goes to the user via Desk.
-  Data: calibration/compare_codescene.py fetch 87687.
+- python@1: Desk card cce-python1-start filed with hub 2026-11-17 (A start now / B after pymrm c2 / C later;
+  docstrings in size D1 exclude / D2 count; recommended A+D1). Basis: pymrm-health notes in
+  ~/Code/pymrm_suite/worktrees/pymrm-health-notes/{codescene_vs_python0.md,solve_py_blind_review.md}.
+  Proposal: thresholds toward CodeScene (cognitive 10, params 4 private only, bumps like CodeScene),
+  new class-state smell (write fan-in >=3, init=False fields, dict-as-struct, positional tuple reads),
+  short-block duplication, docstrings out of size, validate vs CodeScene + blind reviews, playbook
+  anti-pattern "extract method communicating through new mutable fields". On A: think design pass first.
+  pymrm-health tells us when c2 (solve.py) starts.
 - (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
