@@ -109,7 +109,9 @@ File-level smells use `allow-file`.
 ### Profile python@1
 
 Opt in with `[profiles] python = "python@1"` (or `profile = "python@1"`); `python@0` stays the
-default and its output is unchanged. Design and calibration: `docs/py1/design.md`.
+default and its output is unchanged. A config that sets both keys must set both to `python@1`:
+a top-level `profile = "python@0"` next to `[profiles] python = "python@1"` is refused as a
+disagreement. Design and calibration: `docs/py1/design.md`.
 
 | metric | python@0 | python@1 |
 |---|---|---|

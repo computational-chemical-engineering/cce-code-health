@@ -97,3 +97,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-17 python@1 Desk card cce-python1-start filed (pymrm-health recommendation, A+D1 recommended)
 2026-11-17 python@1 campaign opened (Desk cce-python1-start A VERIFIED); PY1_STATE.md, brief py1-design.md
 2026-11-17 python@1 merged to main ffc4a30 (all gates pass; review fixes a72885e); pin to pymrm-health
+2026-11-17 pymrm-health pinned ffc4a30, G3 confirmed, c2 started (CB2 d7c4650); README: profile/[profiles] must agree
