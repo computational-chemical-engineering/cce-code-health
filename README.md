@@ -235,7 +235,9 @@ tiers compare head with it, so tolerances and slowdowns cannot compound over ste
 checks and debt keep using `--base`. Reference outputs of the ref-base are cached under
 `<git-common-dir>/codehealth/cache/<sha>/<tier>/`; head reference runs twice and must be
 deterministic. A reference tier with `coverage = true` must execute every changed function
-(coverage.py, installed in the command's interpreter). In optimize mode the primary benchmark is
+(coverage.py, installed in the command's interpreter). A numba function (`@njit`, `@jit`) counts as
+executed when it was called (its dispatcher compiled or loaded an overload), since coverage.py cannot
+trace a compiled body; a changed one that was not called is named "JIT-compiled" in the failure. In optimize mode the primary benchmark is
 accepted when the 95 % distribution-free lower bound of the median paired speedup reaches
 `min_speedup`; if only the median does, ABBA rounds are added up to `max_repeat` (default
 4 x `repeat`). A benchmark tier's `metric` picks what is timed: `"wall"` (default), `"cpu"`

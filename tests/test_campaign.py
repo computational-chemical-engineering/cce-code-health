@@ -168,6 +168,43 @@ def test_coverage_requires_changed_function_executed(repo, capsys):
     assert rc == 0, out
 
 
+# A stand-in for numba: the dispatcher never runs the Python body (coverage.py cannot trace a
+# compiled body either); a call goes through _DispatcherBase._compile_for_args as in numba.
+FAKE_NUMBA = {
+    "numba/__init__.py": "from numba.core.dispatcher import Dispatcher\n\n\ndef njit(f=None, **kw):\n"
+                         "    return Dispatcher(f) if f is not None else Dispatcher\n",
+    "numba/core/__init__.py": "",
+    "numba/core/dispatcher.py": (
+        "class _DispatcherBase:\n"
+        "    def _compile_for_args(self, *args):\n"
+        "        return 0.5\n\n\n"
+        "class Dispatcher(_DispatcherBase):\n"
+        "    def __init__(self, py_func):\n"
+        "        self.py_func = py_func\n\n"
+        "    def __call__(self, *args):\n"
+        "        return self._compile_for_args(*args)\n"),
+}
+JIT_MOD = ("from numba import njit\n\n\n@njit\ndef calc(x):\n    return (x * 0.1) * 3\n\n\n"
+           "@njit(cache=True)\ndef other(x):\n    return x + 1\n")
+
+
+def test_coverage_counts_a_called_jit_function(repo, capsys):
+    # pymrm-health 2026-11-17: a decorator-only change to a numba kernel the reference calls
+    start(repo, coverage=COV)
+    commit(repo, {**FAKE_NUMBA, "pkg/mod.py": JIT_MOD})
+    commit(repo, {"pkg/mod.py": JIT_MOD.replace("@njit\ndef calc", "@njit(cache=True)\ndef calc")})
+    rc, out = run(repo, "--base", "HEAD~1", capsys=capsys)
+    assert rc == 0, out
+
+
+def test_coverage_names_an_uncalled_jit_function(repo, capsys):
+    start(repo, coverage=COV)
+    commit(repo, {**FAKE_NUMBA, "pkg/mod.py": JIT_MOD})
+    commit(repo, {"pkg/mod.py": JIT_MOD.replace("x + 1", "x + 2")})        # other(): never called
+    rc, out = run(repo, "--base", "HEAD~1", capsys=capsys)
+    assert rc == 1 and "reference does not execute: pkg/mod.py::other (JIT-compiled" in out
+
+
 def test_self_test_fails_when_a_tier_fails_unmutated(repo, capsys):
     cfg = f"""schema = 1
 [[gate.tier]]

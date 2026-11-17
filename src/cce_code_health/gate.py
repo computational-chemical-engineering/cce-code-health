@@ -75,7 +75,8 @@ sitecustomize.py on PYTHONPATH with COVERAGE_PROCESS_START so every Python subpr
 each in-scope function whose span overlaps an added or changed line of head (git diff -U0 against
 `--base`) must have at least one executed body line, else "reference does not execute: ...".
 No data: "no coverage data". Deleted functions are ignored. coverage must be installed in the
-command's interpreter.
+command's interpreter. A numba function counts as executed when its dispatcher was called (the
+sitecustomize hooks _DispatcherBase._compile_for_args); unexecuted, it is named "JIT-compiled".
 
 Benchmarks are never cached (timing must stay paired): one untimed warm-up per side, then ABBA
 rounds, ref-base tree against head; speedup is the median of the paired ratios base_i / head_i;
@@ -950,8 +951,79 @@ def unexecuted_changes(ctx: Ctx, executed: dict[str, set[int]]) -> list[str]:
                     body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
                 continue  # docstring-only function: nothing to execute
             if not hit & span:
-                bad.append(f"{hp}::{qual}")
+                bad.append(f"{hp}::{qual}" + (" (JIT-compiled: never called, or compiled eagerly at import)"
+                                              if _jit_decorated(node) else ""))
     return bad
+
+
+# Every Python (sub)process of a coverage run starts coverage, and, once numba.core.dispatcher is
+# imported, records each numba function called: its first call with new argument types goes
+# through _DispatcherBase._compile_for_args (also when the overload comes from the cache), and
+# coverage.py cannot trace the compiled body (pymrm-health 2026-11-17).
+_SITECUSTOMIZE = """try:
+    import coverage
+    coverage.process_startup()
+except ImportError:
+    pass
+
+
+def _codehealth_jit_hook():
+    import os
+    import sys
+    log = os.environ.get("CODEHEALTH_JIT_LOG")
+    if not log:
+        return
+    import importlib.abc
+    import importlib.util
+
+    def patch(module):
+        base = getattr(module, "_DispatcherBase", None)
+        orig = getattr(base, "_compile_for_args", None)
+        if orig is None:
+            return
+        seen = set()
+
+        def compile_for_args(self, *args, **kws):
+            code = getattr(getattr(self, "py_func", None), "__code__", None)
+            if code is not None and code not in seen:
+                seen.add(code)
+                import dis
+                lines = [n for _, n in dis.findlinestarts(code) if n] or [code.co_firstlineno]
+                with open(log + "." + str(os.getpid()), "a") as fh:
+                    fh.write(f"{os.path.realpath(code.co_filename)}\\t{min(lines)}\\t{max(lines)}\\n")
+            return orig(self, *args, **kws)
+        base._compile_for_args = compile_for_args
+
+    class Finder(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path, target=None):
+            if name != "numba.core.dispatcher":
+                return None
+            sys.meta_path.remove(self)
+            spec = importlib.util.find_spec(name)
+            if spec is None or spec.loader is None:
+                return spec
+            run = spec.loader.exec_module
+
+            def exec_module(module):
+                run(module)
+                patch(module)
+            spec.loader.exec_module = exec_module
+            return spec
+    sys.meta_path.insert(0, Finder())
+
+
+_codehealth_jit_hook()
+"""
+JIT_DECORATORS = frozenset({"njit", "jit", "generated_jit", "vectorize", "guvectorize", "cfunc", "stencil"})
+
+
+def _jit_decorated(node) -> bool:
+    """A numba-style decorator (`@njit`, `@numba.jit(...)`): coverage cannot trace the body."""
+    for d in getattr(node, "decorator_list", []):
+        d = d.func if isinstance(d, ast.Call) else d
+        if (d.attr if isinstance(d, ast.Attribute) else getattr(d, "id", None)) in JIT_DECORATORS:
+            return True
+    return False
 
 
 def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout,
@@ -964,11 +1036,10 @@ def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout,
         rc_file = tmp / ".coveragerc"
         rc_file.write_text(f"[run]\ndata_file = {tmp / 'data' / 'cov'}\nparallel = True\n"
                            f"source =\n    {cwd}\n")
-        (tmp / "site" / "sitecustomize.py").write_text(
-            "try:\n    import coverage\n    coverage.process_startup()\nexcept ImportError:\n    pass\n")
+        (tmp / "site" / "sitecustomize.py").write_text(_SITECUSTOMIZE)
         old = env.get("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
         cenv = {**env, "PYTHONPATH": str(tmp / "site") + (os.pathsep + old if old else ""),
-                "COVERAGE_PROCESS_START": str(rc_file)}
+                "COVERAGE_PROCESS_START": str(rc_file), "CODEHEALTH_JIT_LOG": str(tmp / "data" / "jit")}
         rc, _, _ = _run_checked(t or {}, cmd, cwd, cenv, log, timeout)
         executed: dict[str, set[int]] = {}
         try:
@@ -980,6 +1051,10 @@ def _run_covered(cmd: str, cwd: Path, env: dict, log, timeout,
         data = cov.get_data()
         for f in data.measured_files():
             executed[os.path.realpath(f)] = set(data.lines(f) or [])
+        for log_file in (tmp / "data").glob("jit.*"):
+            for row in log_file.read_text().splitlines():
+                path, first, last = row.rsplit("\t", 2)
+                executed.setdefault(path, set()).update(range(int(first), int(last) + 1))
         return rc, executed
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
