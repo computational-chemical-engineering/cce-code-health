@@ -28,8 +28,10 @@ Campaign cpp@1 + zones (peclet-health request 2026-11-17; the user approved the 
 session; cpp@0 stays frozen and stays Peclet's gate). Design DONE: docs/CPP1_LAYERS.md (think,
 Opus xhigh, with prototype docs/cpp1/proto.py and falsifiers docs/cpp1/f1.cpp); decision row
 2026-11-17 in docs/DECISIONS.md. Step 1 DONE (1bed7b9, paths) and step 2 DONE (317db57, markers:
-src/cce_code_health/zones.py, tests/test_zones.py). Byte-identity script: scratchpad ident.sh of the
-previous session (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files); rebuild it if gone.
+src/cce_code_health/zones.py, tests/test_zones.py). Byte-identity script (scan 9 Peclet + self@cf15245 + 30-commit self diff, 22 files; arg OUTDIR;
+needs PATH=.venv/bin): /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh,
+reference outputs in its before/; Peclet clones: /tmp/claude-1000/-home-eajfpeters-Code/6acb3080-ac42-4dda-bdfb-676e2b649813/scratchpad/peclet
+(zones trial config zm.toml beside ident.sh). Rebuild if gone.
 Peclet zones trial config (user globs > device K-only headers > device KOKKOS markers > host):
 README example plus docs/briefs/cpp1-layers-design.md addendum (dem has no K-only header).
 Next: cpp@1 rules in order (1) preprocessor/if constexpr, (2) loop credit, (3) kernel lambdas,
