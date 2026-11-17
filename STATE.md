@@ -44,7 +44,11 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- None. (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
+- pymrm-health (2026-11-17): CodeScene scores pymrm solve.py 4.70, python@0 says 9.4 (debt 25, params only).
+  It runs a blind review and will recommend (likely python@1 calibrated per file). Acked: python@0 frozen,
+  python@1 queue (LCOM4, complexipy 9, nesting/conditional terms); priority goes to the user via Desk.
+  Data: calibration/compare_codescene.py fetch 87687.
+- (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
   gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
 ## Later (not started)
