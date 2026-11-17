@@ -45,7 +45,7 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- python@1 campaign: merged ffc4a30, all gates pass; pymrm-health pinned it, c2 started 2026-11-17 (CB2 d7c4650; its C2_STATE.md in pymrm-health-notes). Waiting for its first steps (card B condition).
+- python@1 campaign: merged ffc4a30, all gates pass; pymrm-health pinned it, c2 started 2026-11-17 (CB2 d7c4650; its C2_STATE.md in pymrm-health-notes). First 5 c2 steps (S1-S5 on _NewtonRun, 54 -> 11) needed no tool fix: card B condition met 2026-11-18; card still unsigned (hub told). Next c2: S6 interface mode with literals_removed-only plan.
   Release v0.4.0: Desk card cce-v040-release filed by hub (rec B). Exact action texts for the verifier:
   A "tag v0.4.0 at the current main of cce-code-health now and push the tag"
   B "tag v0.4.0 of cce-code-health after pymrm campaign c2 has run its first steps on python@1 without a tool fix, at the main commit at that time, and push the tag"

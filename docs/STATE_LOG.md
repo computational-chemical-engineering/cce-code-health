@@ -98,3 +98,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-17 python@1 campaign opened (Desk cce-python1-start A VERIFIED); PY1_STATE.md, brief py1-design.md
 2026-11-17 python@1 merged to main ffc4a30 (all gates pass; review fixes a72885e); pin to pymrm-health
 2026-11-17 pymrm-health pinned ffc4a30, G3 confirmed, c2 started (CB2 d7c4650); README: profile/[profiles] must agree
+2026-11-18 pymrm c2 S1-S5 on python@1 passed with no tool fix (_NewtonRun 54->11); v0.4.0 card B condition met, card unsigned
