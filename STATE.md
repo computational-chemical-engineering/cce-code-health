@@ -8,9 +8,9 @@ refactor-loop, optimize-loop and healthy-coding skills) that raises code health 
 changing behaviour and builds its own playbook; importable into any repo.
 Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
-## Position (2026-11-16)
+## Position (2026-11-17)
 
-- Tagged v0.2.0 (plugin 0.2.0). main at e4688ce, 508 tests.
+- Tagged v0.3.0 2026-11-17 at a2c3829 (plugin 0.3.0; cpp@1 frozen, captures > 12; zones). 508 tests.
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -24,19 +24,11 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Next action
 
-Campaign cpp@1 + zones: ALL FOUR RULES SHIPPED (design docs/CPP1_LAYERS.md; DECISIONS rows 2026-11-17).
-peclet-health's own nine-repo trial (TRS2, pin 534fa62) came back 2026-11-17: suite 9947.6 / 64 brain
-(cpp@0 11162.9 / 91), rules 1-3 right; on its advice captures threshold > 8 -> > 12 (e4688ce; my clones
-9678.2 -> 9349.7, brains 62). Zones name FINAL (Desk card cce-zones-name VERIFIED A, executed, c82b1ea).
-RELEASE PREPARED, NOT PUSHED: local branch release-0.3.0 at 46a0b5a (cpp@1 frozen, plugin 0.3.0,
-README @v0.3.0) on top of main e4688ce. DECISION-REQUEST sent to hub 2026-11-17 (suggested card
-cce-v030-release; A = fast-forward main to 46a0b5a, push, tag v0.3.0 at 46a0b5a, push tag; B hold;
-C captures > 11). On VERIFIED A: do exactly that, write `executed` to the card, send peclet-health the
-v0.3.0 pin, append STATE_LOG. If main moves before then, rebase release-0.3.0 and ask hub to update
-the card's commit id (the action names 46a0b5a). On C: change threshold to 11 (profiles.py, tests
-_wide sizes, README, CPP1_LAYERS, DECISIONS), new release commit, new card.
-Optional meanwhile (not started): gate `zones` as data (debt_check out-param) for zone_ratchet/log;
-hide unchanged zone rows in diff text; rule (3) open notes (brain match by bare name, --target
+Campaign cpp@1 + zones CLOSED: v0.3.0 tagged 2026-11-17 at a2c3829 (Desk card cce-v030-release VERIFIED A,
+executed). cpp@1 is frozen (any change needs cpp@2). Peclet sent the v0.3.0 pin; it switches its gate
+from cpp@0 (719092b) to cpp@1 when it chooses. Work is reactive again (adopter reports).
+Optional, not started: gate `zones` as data (debt_check out-param) for zone_ratchet/log; hide
+unchanged zone rows in diff text; rule (3) open notes (brain match by bare name, --target
 ambiguity, lambda#k renumbering).
 Scratch tools (rebuild if gone): cpp@1 trial config
 /tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml (base.toml with cpp@1);
@@ -51,9 +43,8 @@ Config key name `[[zones]]` (and output keys zone/zones) is final: user chose A 
 
 ## Open requests
 
-- hub/user: DECISION-REQUEST tag v0.3.0 (sent 2026-11-17; see Next action).
-- peclet-health: told 2026-11-17 (bridge, delivery unconfirmed): captures > 12 at e4688ce, zones name
-  final, v0.3.0 pending; it keeps cpp@0 at 719092b as gate until the v0.3.0 pin arrives.
+- None. (peclet-health: v0.3.0 pin sent 2026-11-17, bridge delivery unconfirmed; user-facing rounds
+  gated with `gate --behaviour-only --mode refactor` + `diff`, no new mode wanted.)
 
 ## Later (not started)
 

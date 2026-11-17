@@ -90,3 +90,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 - 2026-11-17 cpp@1 rule (4) captures 534fa62 (think review: 3 declared-heuristic bugs fixed before commit; capture count alone, not params+captures): Peclet cpp@1 9678.2 / 62, captures debt 514.5; cpp@0 byte-identical; 508 tests; pin sent to peclet-health.
 - 2026-11-17 zones name: Desk card cce-zones-name VERIFIED choice A, keep `[[zones]]`/zone/zones (no code change); docs updated.
 - 2026-11-17 Peclet cpp@1 trial (peclet-health, TRS2, 534fa62): 9947.6 / 64 vs cpp@0 11162.9 / 91; captures > 12 (e4688ce, 17.5 % -> 6.1 % of kernels flagged; clones 9349.7); release 0.3.0 prepared at 46a0b5a (local branch), DECISION-REQUEST to hub.
+- 2026-11-17 v0.3.0 TAGGED at a2c3829 (Desk card cce-v030-release VERIFIED A, executed): cpp@1 frozen (captures > 12), zones. peclet-health: user-facing rounds gated with gate --behaviour-only + diff (no new mode).
