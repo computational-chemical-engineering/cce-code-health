@@ -42,7 +42,8 @@ Peclet's suite-scan scope and layer globs: addendum of docs/briefs/cpp1-layers-d
 
 - peclet-health: cpp@1 + zones; send it the pin when step 1 (zones by paths) lands, and again
   for markers and cpp@1.
-- User (via hub): public name of the zones config key (default `[[zones]]`).
+- User (via hub): public name of the zones config key (default `[[zones]]`). Desk card
+  `decisions/cce-zones-name` (hub agrees with A); act only on a VERIFIED sign-off.
 
 ## Later (not started)
 
