@@ -152,7 +152,7 @@ def test_branch_selection_review_cases(src, kept):
 
 
 def test_cpp1_does_not_share_cpp0_tables():
-    assert CPP1.thresholds == dict(CPP0.thresholds, captures=8) and "captures" not in CPP0.thresholds
+    assert CPP1.thresholds == dict(CPP0.thresholds, captures=12) and "captures" not in CPP0.thresholds
     assert CPP1.weights == dict(CPP0.weights, captures=0.5) and "captures" not in CPP0.weights
     assert CPP0.metrics == ("ccn", "nloc", "nesting", "params")
     assert CPP0.cpp_rules == frozenset()
@@ -394,21 +394,21 @@ def _wide(n):
 
 def test_captures_debt_only_in_cpp1():
     from cce_code_health.report import file_report
-    rep = file_report(analyze("f.cpp", _wide(10), CPP1), 0, CPP1)
+    rep = file_report(analyze("f.cpp", _wide(14), CPP1), 0, CPP1)
     lam = next(f for f in rep["functions"] if f["name"] == "w::lambda#1")
-    assert (lam["captures"], lam["debt_parts"]) == (10, {"captures": 1.0})
+    assert (lam["captures"], lam["debt_parts"]) == (14, {"captures": 1.0})
     assert next(f for f in rep["functions"] if f["name"] == "w")["captures"] == 0
-    assert all("captures" not in f for f in file_report(analyze("f.cpp", _wide(10), CPP0), 0, CPP0)["functions"])
-    rep8 = file_report(analyze("f.cpp", _wide(8), CPP1), 0, CPP1)
+    assert all("captures" not in f for f in file_report(analyze("f.cpp", _wide(14), CPP0), 0, CPP0)["functions"])
+    rep8 = file_report(analyze("f.cpp", _wide(12), CPP1), 0, CPP1)
     assert all("captures" not in f["debt_parts"] for f in rep8["functions"])
 
 
 def test_captures_suppression():
     from cce_code_health.report import file_report
-    src = _wide(10).replace("  Kokkos", "  // codehealth: allow captures -- views of one cell\n  Kokkos")
+    src = _wide(14).replace("  Kokkos", "  // codehealth: allow captures -- views of one cell\n  Kokkos")
     rep = file_report(analyze("f.cpp", src, CPP1), 0, CPP1)
     lam = next(f for f in rep["functions"] if f["name"] == "w::lambda#1")
-    assert (lam["captures"], lam["debt_parts"]) == (10, {})
+    assert (lam["captures"], lam["debt_parts"]) == (14, {})
 
 
 def _caps(body, sig="View a, View b, View y, View x, double dt, double tol, int flag, View mask, double c"):

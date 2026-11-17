@@ -175,7 +175,7 @@ string label (else `<enclosing>::lambda#1`, `#2`, ...); the enclosing function n
 its body (CCN, NLOC, nesting). A lambda can be a brain function. A suppression for it goes on
 the line above the launch statement or on the lines up to the lambda's `{`; its zone is read
 from that head, so `KOKKOS_LAMBDA` can be a zone marker. Lines and suppressions refer to the
-source as written. Rule (4), in place: a kernel lambda carries the metric `captures` (above 8,
+source as written. Rule (4), in place: a kernel lambda carries the metric `captures` (above 12,
 weight 0.5; other functions have 0): the entries of its capture list (`this` and `*this` count
 one), plus, with a default capture (`[=]`, `[&]`, and every kernel macro), the parameters and
 earlier locals of the enclosing function (and the parameters of enclosing kernels) that its

@@ -70,11 +70,12 @@ PROFILES = {
 }
 # In development, not frozen: rules are added one by one (docs/CPP1_LAYERS.md) and the
 # profile is released only after a Peclet run. Thresholds and weights of cpp@0, plus captures
-# (> 8, weight 0.5; the capture count alone, params are charged on their own).
+# (> 12, weight 0.5; the capture count alone, params are charged on their own; 12 after the
+# Peclet trial: > 8 flagged 17.5 % of kernels, > 12 flags 6.1 %, docs/CPP1_LAYERS.md).
 _CPP0 = PROFILES["cpp@0"]
 PROFILES["cpp@1"] = replace(
     _CPP0, name="cpp@1", metrics=CPP1_METRICS,
-    thresholds=dict(_CPP0.thresholds, captures=8), weights=dict(_CPP0.weights, captures=0.5),
+    thresholds=dict(_CPP0.thresholds, captures=12), weights=dict(_CPP0.weights, captures=0.5),
     cpp_rules=frozenset({"preprocess", "loop_credit", "kernels"}),
     kernel_macros=("KOKKOS_LAMBDA", "KOKKOS_CLASS_LAMBDA"), kernel_this_macros=("KOKKOS_CLASS_LAMBDA",),
     kernel_calls=("parallel_for", "parallel_reduce", "parallel_scan"))

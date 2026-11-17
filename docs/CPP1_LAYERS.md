@@ -66,7 +66,7 @@ A suppression covers a lambda from the line above the launch to the lambda's `{`
 (4) Captures, new metric `captures`, lambdas only: explicit capture entries, plus with a default
 capture the names the body uses that are parameters or earlier locals of the enclosing function
 (not lambda params, body locals, names after . -> ::); `this` counts 1.
-Weights: ccn >10 w1, nloc >70 w0.1, nesting >3 w3 (with the credit), params >5 w1, captures >8 w0.5.
+Weights: ccn >10 w1, nloc >70 w0.1, nesting >3 w3 (with the credit), params >5 w1, captures >8 w0.5 (raised to >12 after the Peclet trial, below).
 Brain: CCN > 25 and NLOC > 70; lambdas can be brains. Rejected: captures added to params at
 threshold 5 (+4069 debt, +45 %).
 
@@ -159,3 +159,10 @@ CCN - 1 and NLOC conserved in all 263 files). After a think review:
 19 functions under cpp@0, 27 in the one-branch view; core portable.hpp 25 vs 17 because each branch
 duplicates the same functions). (b) cpp_backend.py:114-118: `if constexpr` opens a nesting level
 and each `else if constexpr` adds a spurious one (a flat chain scores 3); twice in Peclet.
+
+Captures threshold after the Peclet trial (2026-11-17, peclet-health on TRS2 at 534fa62, nine repos):
+> 8 flagged 17.5 % of kernel lambdas (228 of 1302), more than any other metric flags (ccn > 10:
+7.7 % of other functions and 7.9 % of kernels; nloc > 70: 2.9 % / 1.1 %; nesting > 3: 1.4 % / 0.8 %;
+params > 5: 13.5 % / 2.0 %). A stencil kernel reading ten Views is normal device code, so > 8 marks
+the body of the distribution. Raised to > 12 (6.1 %, 79 kernels, captures debt 186.0; percentiles
+p50 4, p75 7, p90 11, p95 13, p99 20). Not taken: > 11 (8.4 %, debt 240.5), the ccn share.
