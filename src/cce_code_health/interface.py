@@ -996,9 +996,66 @@ def _callers(plan, callers, tb, th, roots):
     return out, {"deleted": deleted, "changed_calls": calls, "files": len(callers)}
 
 
+_FROM_IMPORT = re.compile(r"(?<![\w.])from[ \t]+([A-Za-z_][\w.]*)[ \t]+import[ \t]+"
+                          r"(\w+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*\w+(?:[ \t]+as[ \t]+\w+)?)*)")
+_SPLIT_PREFIX = re.compile(r'[ \t]*(?:"|>>> |\.\.\. )?[ \t]*')
+_SPLIT_SUFFIXES = ("", '\\n",')        # end of a markdown line; a notebook source line that is not the last
+
+
+def _moved_from(m: re.Match, line: str, renames: dict, rank: dict, alone: bool) -> str | None:
+    """The text the plan implies for one `from M import ...` match, or None (nothing moves, or a
+    split the line's surroundings do not allow)."""
+    mod, items = m.group(1), m.group(2).split(",")
+    moved = []                                   # (item, target module, target name, " as x" or "")
+    for it in items:
+        name = it.split()[0]
+        tm, _, tn = _ren(f"{mod}.{name}", renames).rpartition(".")
+        moved.append((it, tm, tn, it.strip()[len(name):]))
+    if all(tm == mod and tn == it.split()[0] for it, tm, tn, _ in moved):
+        return None
+    groups: dict[str, list[str]] = {}
+    for _, tm, tn, rest in moved:
+        groups.setdefault(tm, []).append(tn + rest)
+    if len(groups) == 1:                         # in place, the line's own spacing kept
+        kept = [it.replace(it.split()[0], tn, 1) for it, _, tn, _ in moved]
+        return line[m.start():m.start(1)] + moved[0][1] + line[m.end(1):m.start(2)] + ",".join(kept)
+    pre, suf = line[:m.start()], line[m.end():]
+    if not alone or not _SPLIT_PREFIX.fullmatch(pre) or suf not in _SPLIT_SUFFIXES:
+        return None
+    keys = sorted(groups, key=lambda t: (t != mod, rank.get(t, len(rank)), t))
+    return "\n".join(f"{pre}from {t} import {', '.join(groups[t])}{suf}" for t in keys)
+
+
+def _move_from_imports(text: str, renames: dict, order: list[str]) -> tuple[str, list[str]]:
+    """Each one-line `from M import a, b as c` whose names the plan moves becomes the line(s) the
+    plan implies: in place when every name lands in one module; otherwise one line per target
+    module (names left in M first, then the plan's order of target modules), only when the line
+    holds nothing else but an indent, a notebook quote or a doctest prompt. Rewritten spans become
+    placeholders (NUL k NUL) so the dotted-name substitutions do not touch them again; returns
+    (text, replacements)."""
+    rank = {m: i for i, m in reversed(list(enumerate(order)))}
+    reps: list[str] = []
+    lines = text.split("\n")
+    for li, line in enumerate(lines):
+        hits = list(_FROM_IMPORT.finditer(line))
+        for m in reversed(hits):
+            new = _moved_from(m, line, renames, rank, len(hits) == 1)
+            if new is None:
+                continue
+            reps.append(new)
+            whole = "\n" in new                  # a split replaces the whole line
+            line = (f"\x00{len(reps) - 1}\x00" if whole
+                    else line[:m.start()] + f"\x00{len(reps) - 1}\x00" + line[m.end():])
+        lines[li] = line
+    return "\n".join(lines), reps
+
+
 def _text_problems(path, base, head, renames, plan, roots) -> list[str]:
     """Non-Python callers (docs, data): only the plan's renames, as dotted names, file paths and
-    bare names whose spelling changes; nothing deleted or rewritten."""
+    bare names whose spelling changes, and one-line `from M import ...` statements that follow the
+    plan's moves (`_move_from_imports`); nothing deleted or rewritten."""
+    order = [_dotted(_split(n)[0], roots) for n in [*plan["renamed"].values(), *plan.get("retargeted", {}).values()]]
+    base, reps = _move_from_imports(base, renames, [d for d in order if d])
     subs = [(o, n) for o, n in renames.items()]
     for o, n in [*plan["renamed"].items(), *plan.get("retargeted", {}).items()]:
         po, no = _split(o)
@@ -1009,6 +1066,7 @@ def _text_problems(path, base, head, renames, plan, roots) -> list[str]:
     for o, n in sorted(set(subs), key=lambda x: -len(x[0])):
         if o != n:
             base = re.sub(rf"(?<![\w.]){re.escape(o)}(?![\w])", n, base)
+    base = re.sub("\x00(\\d+)\x00", lambda k: reps[int(k.group(1))], base)
     if base == head:
         return []
     bl, hl = base.split("\n"), head.split("\n")

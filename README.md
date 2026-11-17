@@ -475,7 +475,11 @@ in refactor mode, except:
   compound one only when every non-trivial statement in it uses one) and the arguments of a
   call to a changed name may differ. Caller files may not be added, deleted or renamed (no new
   `conftest.py`); binary caller files (not strict UTF-8, or holding NUL) may not change;
-  non-Python callers may only take the renames. Python source inside a multi-line string with an
+  non-Python callers may only take the renames, plus one-line `from M import a, b as c` statements
+  that follow the plan's moves: in place when every name lands in one module, else split into
+  one line per target module (names that stay in M first, then target modules in the plan's
+  order), and a split only where the line holds nothing else but an indent, a notebook quote with
+  a following source line, or a doctest prompt (parenthesised imports: rewrite by hand). Python source inside a multi-line string with an
   import (a script a subprocess runs) is normalised like code, imports kept as their renamed
   targets, and its line count and comments must match. The check's JSON entry `callers` lists every deleted statement and the number of
   changed calls. Not supported (rejected, rewrite by hand outside the gate): deleting a helper

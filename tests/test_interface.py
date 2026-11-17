@@ -617,3 +617,57 @@ def test_gate_no_implicit_reexport_scans_untouched_importers(tmp_path, capsys):
     (repo / "pkg/b.py").write_text("class E(Exception):\n    pass\n")
     (repo / "pkg/a.py").write_text("from pkg.b import E\n\n\ndef f():\n    raise E()\n")
     assert main(args) == 0, capsys.readouterr().out
+
+
+# Text callers: a one-line `from M import a, b` may follow the plan's moves (OpenFlowsheet S19 I-12a).
+TP = {"removed": [], "changed": [], "added": [], "callers": ["README.md", "docs/**", "examples/**"],
+      "renamed": {"src/app/types.py:Change": "src/app/transaction_types.py:Change",
+                  "src/app/types.py:Edit": "src/app/transaction_types.py:Edit",
+                  "src/app/types.py:Port": "src/app/ports.py:Port",
+                  "src/app/types.py:Old": "src/app/ports.py:New"}}
+NB_OK = '    "from app.types import Port, Change\\n",\n    "x = 1\\n"\n'
+NB_SPLIT = ('    "from app.transaction_types import Change\\n",\n    "from app.ports import Port\\n",\n'
+            '    "x = 1\\n"\n')
+
+
+@pytest.mark.parametrize("base,head,path,ok", [
+    ("Use:\n\n    from app.types import Change, Edit\n", "Use:\n\n    from app.transaction_types import Change, Edit\n",
+     "README.md", True),
+    ("from app.types import Change as C, Edit\n", "from app.transaction_types import Change as C, Edit\n",
+     "README.md", True),
+    ("from app.types import Change, Edit  # see\n", "from app.transaction_types import Change, Edit  # see\n",
+     "README.md", True),
+    ('    "from app.types import Change, Edit\\n",\n', '    "from app.transaction_types import Change, Edit\\n",\n',
+     "examples/a.ipynb", True),
+    ("from app.types import Change, Port\n", "from app.transaction_types import Change\nfrom app.ports import Port\n",
+     "docs/q.md", True),
+    (NB_OK, NB_SPLIT, "examples/a.ipynb", True),
+    (">>> from app.types import Change, Port\n",
+     ">>> from app.transaction_types import Change\n>>> from app.ports import Port\n", "docs/q.md", True),
+    ("from app.types import Old\nOld()\n", "from app.ports import New\nNew()\n", "docs/q.md", True),
+    ("from app.types import Keep, Change\n", "from app.types import Keep\nfrom app.transaction_types import Change\n",
+     "docs/q.md", True),
+    ("see app.types.Change\n", "see app.transaction_types.Change\n", "docs/q.md", True),
+    # refused
+    ("from app.types import Change, Port\n", "from app.ports import Port\nfrom app.transaction_types import Change\n",
+     "docs/q.md", False),                                                     # not the plan's order
+    ('    "from app.types import Change, Port"\n',
+     '    "from app.transaction_types import Change"\n    "from app.ports import Port"\n',
+     "examples/a.ipynb", False),                                              # would break the JSON
+    ("from app.types import Change, Port  # x\n",
+     "from app.transaction_types import Change  # x\nfrom app.ports import Port  # x\n", "docs/q.md", False),
+    ("from app.types import Change\n", "from app.transaction_types import Change, Edit\n", "docs/q.md", False),
+    ("from app.types import Change, Edit\n", "from app.transaction_types import Change\n", "docs/q.md", False),
+    ("from app.other import Change\n", "from app.transaction_types import Change\n", "docs/q.md", False),
+    ("from app.types import Change, Edit\n", "from app.types import Change, Edit\nx\n", "docs/q.md", False),
+])
+def test_text_caller_from_import_follows_moves(base, head, path, ok):
+    probs = caller_problems(TP, [("M", path, path)], {path: base}, {path: head}, ["src"])
+    assert (probs == []) == ok, probs
+
+
+def test_text_caller_from_import_keeps_spacing_and_tabs():
+    base, head = "from app.types import Old\tas  O,Edit\n", "from app.ports import New\tas  O,Edit\n"
+    assert caller_problems(TP, [("M", "d.md", "d.md")], {"d.md": base}, {"d.md": head}, ["src"]) != []  # 2 modules
+    base, head = "from app.types import Old\tas  O,Port\n", "from app.ports import New\tas  O,Port\n"
+    assert caller_problems(TP, [("M", "d.md", "d.md")], {"d.md": base}, {"d.md": head}, ["src"]) == []
