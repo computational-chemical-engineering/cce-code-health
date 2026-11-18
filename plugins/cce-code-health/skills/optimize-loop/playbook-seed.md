@@ -17,6 +17,12 @@ reference comparison should expect. "none" means the step should still be bitwis
 | py-batch-rhs | many solves or evaluations one by one | independent right-hand sides or states | memory limits | small |
 | py-cache-pure | pure function called with repeated hashable arguments | measured repeat rate is high | arguments are arrays or mutable; memory growth matters | none |
 
+Numba: say whether a speedup criterion means a cold run (no cache: compile, and for
+`cache=True` a cache write, in every run; the benchmark tier's default `cache = "cold"`) or a
+warm one (`cache = "warm"`: each side keeps its cache across the timed runs). The two can
+disagree in sign: pymrm c2 (2026-11-18), `njit(cache=True)` cost about 1.6 pp cold and was a
+gain warm.
+
 ## C++
 
 | id | targets | when | when not | round-off |

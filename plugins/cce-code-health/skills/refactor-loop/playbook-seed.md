@@ -35,7 +35,23 @@ side effects and floating-point operations, same exceptions and messages.
 - Before each split, re-derive the move set and the importer list at the base and write the
   expected `codehealth arch` numbers into the plan before the run; a mismatch stops the split.
 
+## Step shape
+
+- A helper-only step (the helper added, no caller yet) fails a reference tier with
+  `coverage = true` ("does not execute"): commit a new helper together with its first caller.
+- With a literals rule (refactor's "no literal added or removed", or an interface plan's exact
+  `literals_*` list), a literal that moves from one step's file into another's can force two
+  steps into one commit; plan the step around where the literal ends up.
+
 ## Anti-patterns (review rejects; they lower the score without helping)
+
+- **Fragmenting for the metric**: per-function thresholds reward splitting one readable
+  function into many small helpers that each pass. A blind review (the reviewer does not see
+  the score) is the readability check; when it cannot follow the call chain, merge back.
+- **Helpers in the hot loop**: each extracted call or small `NamedTuple` built per Newton or
+  residual iteration costs about 1 to 2 us (pymrm c2, 2026-11-18: about 3 % on bench-newton
+  over a dozen steps, each step under the gate's limit). Benchmarks compare with the campaign
+  base, so the cost shows up cumulatively; keep inner-loop extractions flat, or measure them.
 
 - **Lifting one branch out of a structural recursion** so the extracted helper and the
   original call each other: mutual recursion for a score drop. Keep a recursive walk in
