@@ -130,15 +130,16 @@ def fake_bench(monkeypatch, head_times):
 
 
 def test_extended_rounds_when_median_passes_but_bound_does_not(monkeypatch):
-    # warm-up 0.5, then n=5 ratios [2,2,2,2,1]: median 2 >= 1.2, bound = min = 1 < 1.2.
-    ctx, tree = fake_bench(monkeypatch, [0.5, 0.5, 0.5, 0.5, 0.5, 1.0] + [0.5] * 10)
+    # warm-up 0.5, then repeat 5 rounded up to n=6, ratios [2,2,2,2,2,1]: median 2 >= 1.2,
+    # bound = min = 1 < 1.2; one ABBA extension to n=8 lifts the bound to 2.
+    ctx, tree = fake_bench(monkeypatch, [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0] + [0.5] * 10)
     t = {"name": "b", "cmd": "x", "primary": True, "min_speedup": 1.2, "repeat": 5}
     ok, detail = gatemod._benchmark(t, ctx, tree)
-    assert ok and "extended from 5 to 9 rounds" in detail and "lower bound 2.000" in detail
-    ctx, tree = fake_bench(monkeypatch, [0.5, 0.5, 0.5, 0.5, 0.5, 1.0] + [0.5] * 10)
-    ok, detail = gatemod._benchmark(dict(t, max_repeat=5), ctx, tree)
+    assert ok and "extended from 6 to 8 rounds" in detail and "lower bound 2.000" in detail
+    ctx, tree = fake_bench(monkeypatch, [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0] + [0.5] * 10)
+    ok, detail = gatemod._benchmark(dict(t, max_repeat=6), ctx, tree)
     assert not ok and "extended" not in detail
-    ctx, tree = fake_bench(monkeypatch, [0.5] + [1.0] * 5)          # median below need: no extension
+    ctx, tree = fake_bench(monkeypatch, [0.5] + [1.0] * 6)          # median below need: no extension
     ok, detail = gatemod._benchmark(t, ctx, tree)
     assert not ok and "extended" not in detail
 

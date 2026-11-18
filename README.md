@@ -287,7 +287,8 @@ repo-supplied tiers from `[gate]` in the base's config: `command` (exit code), `
 (outputs at head vs base; base run twice for determinism; bitwise in refactor mode,
 `tolerance = {rel, abs, ulp}` in optimize mode; `.npy` shape and dtype must match, integers
 compare exactly, non-finite values must match) and `benchmark` (warm-up, then ABBA paired
-runs, median of the paired ratios, fresh TMPDIR, XDG_CACHE_HOME and NUMBA_CACHE_DIR per run, no
+runs, `repeat` pairs (default 5) rounded up to an even number so that base and head run first
+equally often, median of the paired ratios, wall time from a blocking wait (no polling grid), fresh TMPDIR, XDG_CACHE_HOME and NUMBA_CACHE_DIR per run, no
 writes into the tree; gitignored files the warm-up writes, `.pyc` aside, are named in a note, since a
 cache there would make the timed runs warm). Benchmark tiers
 require `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS` and `MKL_NUM_THREADS` in `[gate.env]`. In

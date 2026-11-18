@@ -215,6 +215,7 @@ import resource
 import shutil
 import signal
 import tempfile
+import threading
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -762,13 +763,28 @@ def _run(cmd: str, cwd: Path, env: dict, log, timeout: float | None) -> tuple[in
     # Otherwise grandchildren such as pytest-xdist workers on a hung test keep running.
     proc = subprocess.Popen(cmd, shell=True, cwd=cwd, env={**os.environ, **env},
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    # A blocking wait, with the timeout on a timer thread: Popen.wait(timeout=...) polls with
+    # sleeps of up to 50 ms, which put benchmark times on a 50 ms grid (pymrm-health 2026-11-18).
+    expired = threading.Event()
+
+    def expire():
+        expired.set()
+        _kill_group(proc)
+    timer = threading.Timer(timeout, expire) if timeout else None
     try:
-        rc = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
+        if timer:
+            timer.daemon = True
+            timer.start()
+        rc = proc.wait()
+    finally:
+        if timer:
+            timer.cancel()
+            if expired.is_set():
+                timer.join()    # let its TERM-then-KILL finish
+        _kill_group(proc)  # also reaps stragglers a finished tier left behind
+    if expired.is_set():
         log.write(f"TIMEOUT after {timeout} s\n")
         rc = 124
-    finally:
-        _kill_group(proc)  # also reaps stragglers a finished tier left behind
     log.write(f"exit {rc}\n")
     return rc, time.monotonic() - t0
 
@@ -1199,6 +1215,7 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
     of the median reaches min_speedup; if only the median does, ABBA rounds (2 runs per side)
     are added until the bound passes or n reaches max_repeat (default 4 * repeat)."""
     repeat = int(t.get("repeat", 5))
+    repeat += repeat % 2    # even: each side runs first equally often (an order effect cancels)
     sides = {"base": get_tree(), "head": ctx.repo}
     args = dict(base=ctx.ref_base, files=ctx.files, env=ctx.env, log=ctx.log)
     err, warm_note = _warm_up(t, sides, args)
