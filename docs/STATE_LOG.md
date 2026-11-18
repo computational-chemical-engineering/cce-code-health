@@ -101,3 +101,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-18 pymrm c2 S1-S5 on python@1 passed with no tool fix (_NewtonRun 54->11); v0.4.0 card B condition met, card unsigned
 2026-11-18 v0.4.0 tagged at 6f5bc28 (python@1 frozen); Desk cce-v040-release B VERIFIED, executed
 2026-11-18 pymrm c2 S6 interface mode with literals_removed-only plan passed first time (S7, S8 too; package debt 358.5 -> 311.3); README: literal multiset is net over touched files
+2026-11-18 rule (3) notes closed: new brains matched as a name multiset ignoring lambda#k numbers (report.new_brains; diff, gate note, zones); README --target ambiguity, labels; think review; 552 tests; rescore all adopters (Peclet cpp@0 10899.5/89, cpp@1 9349.7/62 unchanged)
