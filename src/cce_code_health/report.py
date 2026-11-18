@@ -1,6 +1,8 @@
 """Debt, smells and the display score for analysed files."""
 from __future__ import annotations
 
+from collections import Counter
+
 from .profiles import PROFILES, Profile
 from .python_backend import FileMetrics, FunctionMetrics
 
@@ -134,6 +136,30 @@ def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[
         if new:
             errors.append(f"{path}: new file smell(s) {', '.join(new)} (nloc {r['nloc']})")
     return errors, notes
+
+
+def new_brains(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[tuple[str, dict]]:
+    """(head path, function) for each new brain function over the touched files.
+
+    Brains are matched by name as a multiset, not per file: a brain that moves between touched
+    files (a split, a rename) is not new, but a head brain beyond the base's count for its name
+    is, so a repeated name (C++ overloads, a `run::lambda#1` in another file) cannot hide one.
+    Within a name, head brains in the file that had it at base (or that file's rename
+    counterpart) are matched first, so the excess is reported where it was added; within one
+    file the first in source order is matched, so a new overload above an old one reports the old
+    one's line."""
+    counterpart = {h: b for _, b, h in changes if h}
+    left = Counter(f["name"] for r in rb.values() for f in r["functions"] if f["brain"])
+    had = {(p, f["name"]) for p, r in rb.items() for f in r["functions"] if f["brain"]}
+    head = [(p, f) for p, r in sorted(rh.items()) for f in r["functions"] if f["brain"]]
+    head.sort(key=lambda pf: (counterpart.get(pf[0], pf[0]), pf[1]["name"]) not in had)
+    out = []
+    for p, f in head:
+        if left[f["name"]]:
+            left[f["name"]] -= 1
+        else:
+            out.append((p, f))
+    return sorted(out, key=lambda pf: (pf[0], pf[1]["line"]))
 
 
 def _new_writes(old: dict | None, new: dict) -> str:

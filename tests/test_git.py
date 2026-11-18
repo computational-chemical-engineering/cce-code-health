@@ -89,6 +89,17 @@ def test_new_brain_function_fails(repo, capsys):
     assert "new brain function" in capsys.readouterr().out
 
 
+def test_repeated_name_cannot_hide_a_new_brain(repo, capsys):
+    commit(repo, {"pkg/a.py": SIMPLE + "\n" + brain()}, "brain big at base")
+    git(repo, "checkout", "-qb", "twin")
+    commit(repo, {"pkg/a.py": SIMPLE + "\n\ndef f2(x):\n    return x\n\n" + brain(),
+                  "pkg/e.py": brain()}, "second brain named big in another file")
+    assert diff(repo, "--base", "main", "--head", "HEAD") == 1
+    out = capsys.readouterr().out
+    flagged = [ln for ln in out.splitlines() if "new brain function" in ln]
+    assert len(flagged) == 1 and "pkg/e.py:1 big" in flagged[0]
+
+
 def test_head_cannot_loosen_its_own_config(repo):
     commit(repo, {".codehealth/config.toml": 'schema = 1\n[scope]\ninclude = ["pkg/*"]\n'})
     git(repo, "checkout", "-qb", "loosen")

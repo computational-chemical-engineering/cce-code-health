@@ -89,7 +89,10 @@ follow-up brings the new functions under the brain thresholds, and health recove
 `diff` compares the merge-base of `--base` and head (default: working tree) and uses the
 base's `.codehealth/config.toml`. It fails if debt over the touched files rises, a file
 smell (large file, duplication) appears, or a new brain function appears; under `python@1`
-also if class state rises (the class-state ratchet below).
+also if class state rises (the class-state ratchet below). Brain functions are matched by name
+over the touched files as a multiset: a brain that moves to another touched file is not new,
+but a second brain under a name the base had once (a C++ overload, `run::lambda#1` in another
+file) is; the excess is reported, where possible, in a file that did not have the name at base.
 
 Optional `.codehealth/config.toml`:
 
@@ -240,7 +243,10 @@ counts one level less, so a triple loop with an `if` inside scores nesting 3, no
 place: a kernel lambda (`KOKKOS_LAMBDA(...)` or `KOKKOS_CLASS_LAMBDA(...)` then `{`, or a
 `[...]` lambda passed directly to `parallel_for`, `parallel_reduce` or `parallel_scan`) inside a
 function is scored as a function of its own, named `<enclosing>::<label>` after the call's
-string label (else `<enclosing>::lambda#1`, `#2`, ...); the enclosing function no longer counts
+string label (else `<enclosing>::lambda#1`, `#2`, ..., numbered in source order, so adding,
+removing or labelling an unlabelled kernel renumbers the later ones in that function: label kernels
+that a campaign targets with `--target`; suppressions are anchored to lines and do not move); the
+enclosing function no longer counts
 its body (CCN, NLOC, nesting). A lambda can be a brain function. A suppression for it goes on
 the line above the launch statement or on the lines up to the lambda's `{`; its zone is read
 from that head, so `KOKKOS_LAMBDA` can be a zone marker. Lines and suppressions refer to the
@@ -381,7 +387,9 @@ record carries `branch`. Separate clones keep separate logs.
 For results other than accepted, `head_sha` is `meta.head` when it is a sha (a committed step that
 failed keeps its evidence), else null. Debt in the gate is per touched file; for a function
 target (`path::name`) the record also carries `target_debt`: the function's own debt before and
-after (0 when absent; a name matches exactly or as the last `::`/`.` component) and
+after (0 when absent; a name matches exactly or as the last `::`/`.` component; when several
+match, for instance a Kokkos label that repeats its enclosing function's name, the record
+carries `ambiguous` with the candidates and the full qualified name must be given) and
 `new_in_file`, the new functions with debt in that file (an extracted helper that is a hotspot
 itself), and `relocated`, their debt as a share of the function's drop (near 1: the complexity
 moved to a new address; Peclet dem S3: 0.99 and 0.95 for two steps whose file gain was 0.3 and 5.4). The gate JSON's meta `function_debt` holds the per-function numbers it comes from.

@@ -1520,7 +1520,7 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     files may not rise, an error in refactor, restructure and interface `mode`, a note in
     optimize mode (a cache field is legitimate there)."""
     from .cli import analyze_ref, new_errors  # noqa: PLC0415 (cli imports this module)
-    from .report import class_state_rises, new_file_smells, size_smells  # noqa: PLC0415
+    from .report import class_state_rises, new_brains, new_file_smells, size_smells  # noqa: PLC0415
     bp = {b for _, b, _ in changes if b and cfg.in_scope(b)}
     hp = {h for _, _, h in changes if h and cfg.in_scope(h)}
     rb, rh = analyze_ref(repo, base, cfg, bp), analyze_ref(repo, None, cfg, hp)
@@ -1543,9 +1543,7 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
     state = class_state_rises(rb, rh, changes)
     if mode != "optimize":
         errors += state
-    base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
-    brains = sorted(f"{r['path']}::{f['name']}" for r in rh.values() for f in r["functions"]
-                    if f["brain"] and f["name"] not in base_brains)
+    brains = [f"{p}::{f['name']}" for p, f in new_brains(rb, rh, changes)]
     note = [f"new brain function(s): {', '.join(brains[:3])} (an intermediate; the milestone must "
             f"bring the count back)"] if brains else []
     note += smell_notes[:2]
@@ -1553,7 +1551,7 @@ def debt_check(repo: Path, base: str, cfg: config.Config, changes,
         note += [f"note: {m} (allowed in optimize mode)" for m in state[:2]]
     if cfg.zones:
         from .zones import compare, compare_text  # noqa: PLC0415
-        note.append(compare_text(compare(rb, rh, cfg.zones)))
+        note.append(compare_text(compare(rb, rh, cfg.zones, changes)))
     return (Check("debt", dh <= db + 1e-9 and not errors,
                   "; ".join([f"{db:.1f} -> {dh:.1f}"] + errors[:3] + note)), db, dh)
 
