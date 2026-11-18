@@ -1,6 +1,7 @@
 """Debt, smells and the display score for analysed files."""
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 from .profiles import PROFILES, Profile
@@ -138,25 +139,35 @@ def new_file_smells(rb: dict[str, dict], rh: dict[str, dict], changes) -> tuple[
     return errors, notes
 
 
+_LAMBDA_NO = re.compile(r"lambda#\d+")
+
+
+def _brain_key(name: str) -> str:
+    """Name for new-brain matching: a kernel lambda's number dropped (`run::lambda#2` ->
+    `run::lambda#`), so renumbering after a kernel is added, removed or labelled is not a new brain."""
+    return _LAMBDA_NO.sub("lambda#", name)
+
+
 def new_brains(rb: dict[str, dict], rh: dict[str, dict], changes) -> list[tuple[str, dict]]:
     """(head path, function) for each new brain function over the touched files.
 
     Brains are matched by name as a multiset, not per file: a brain that moves between touched
     files (a split, a rename) is not new, but a head brain beyond the base's count for its name
     is, so a repeated name (C++ overloads, a `run::lambda#1` in another file) cannot hide one.
+    Kernel lambda numbers are ignored (`_brain_key`): renumbering is not a new brain.
     Within a name, head brains in the file that had it at base (or that file's rename
     counterpart) are matched first, so the excess is reported where it was added; within one
     file the first in source order is matched, so a new overload above an old one reports the old
     one's line."""
     counterpart = {h: b for _, b, h in changes if h}
-    left = Counter(f["name"] for r in rb.values() for f in r["functions"] if f["brain"])
-    had = {(p, f["name"]) for p, r in rb.items() for f in r["functions"] if f["brain"]}
+    left = Counter(_brain_key(f["name"]) for r in rb.values() for f in r["functions"] if f["brain"])
+    had = {(p, _brain_key(f["name"])) for p, r in rb.items() for f in r["functions"] if f["brain"]}
     head = [(p, f) for p, r in sorted(rh.items()) for f in r["functions"] if f["brain"]]
-    head.sort(key=lambda pf: (counterpart.get(pf[0], pf[0]), pf[1]["name"]) not in had)
+    head.sort(key=lambda pf: (counterpart.get(pf[0], pf[0]), _brain_key(pf[1]["name"])) not in had)
     out = []
     for p, f in head:
-        if left[f["name"]]:
-            left[f["name"]] -= 1
+        if left[_brain_key(f["name"])]:
+            left[_brain_key(f["name"])] -= 1
         else:
             out.append((p, f))
     return sorted(out, key=lambda pf: (pf[0], pf[1]["line"]))

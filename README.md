@@ -92,7 +92,7 @@ smell (large file, duplication) appears, or a new brain function appears; under 
 also if class state rises (the class-state ratchet below). Brain functions are matched by name
 over the touched files as a multiset: a brain that moves to another touched file is not new,
 but a second brain under a name the base had once (a C++ overload, `run::lambda#1` in another
-file) is; the excess is reported, where possible, in a file that did not have the name at base.
+file) is (kernel lambda numbers are ignored, so renumbering is not a new brain); the excess is reported, where possible, in a file that did not have the name at base.
 
 Optional `.codehealth/config.toml`:
 
