@@ -42,3 +42,17 @@ def test_added_file_at_renamed_files_old_path_is_blamed():
     rh = {"core.py": rep("X"), "a.py": rep("X")}
     out = new_brains(rb, rh, [("R", "a.py", "core.py"), ("A", None, "a.py")])
     assert names(out) == [("a.py", "X")]
+
+
+def test_kernel_renumbering_is_not_a_new_brain():
+    small = {"name": "main::lambda#1", "line": 1, "brain": False}
+    rb = {"a.cpp": {"functions": [small, {"name": "main::lambda#2", "line": 9, "brain": True}]},
+          "b.cpp": rep("main::lambda#1")}
+    rh = {"a.cpp": rep("main::lambda#1"), "b.cpp": rep("main::lambda#1")}   # small kernel labelled
+    assert new_brains(rb, rh, [("M", "a.cpp", "a.cpp"), ("M", "b.cpp", "b.cpp")]) == []
+
+
+def test_new_kernel_brain_still_counts():
+    rb = {"a.cpp": rep("main::lambda#1")}
+    rh = {"a.cpp": rep("main::lambda#1", "main::lambda#2")}
+    assert names(new_brains(rb, rh, [("M", "a.cpp", "a.cpp")])) == [("a.cpp", "main::lambda#2")]
