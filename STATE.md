@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-17)
 
-- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 543 tests.
+- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 552 tests on main after PR brain-multiset (new brains: name multiset, lambda numbers ignored).
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -29,9 +29,8 @@ python@1 campaign closed (docs/PY1_STATE.md is history).
 Campaign cpp@1 + zones CLOSED: v0.3.0 tagged 2026-11-17 at a2c3829 (Desk card cce-v030-release VERIFIED A,
 executed). cpp@1 is frozen (any change needs cpp@2). Peclet sent the v0.3.0 pin; it switches its gate
 from cpp@0 (719092b) to cpp@1 when it chooses. Work is reactive again (adopter reports).
-Optional, not started: gate `zones` as data (debt_check out-param) for zone_ratchet/log; hide
-unchanged zone rows in diff text; rule (3) open notes (brain match by bare name, --target
-ambiguity, lambda#k renumbering).
+Optional, not started (advice 2026-11-18: wait for an adopter ask): gate `zones` as data for zone_ratchet/log; hide
+unchanged zone rows in diff text. Rule (3) open notes closed 2026-11-18 (brain-multiset).
 Scratch tools (rebuild if gone): cpp@1 trial config
 /tmp/claude-1000/-home-eajfpeters-Code/f09cf2c9-1eb8-4cbc-bc24-43d3e6ca2a4f/scratchpad/c1.toml (base.toml with cpp@1);
 byte-identity script /tmp/claude-1000/-home-eajfpeters-Code/4c980d79-9d8f-4423-bf32-2b51015d63c9/scratchpad/ident.sh OUTDIR
