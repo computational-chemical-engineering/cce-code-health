@@ -106,3 +106,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-18 pymrm-health bench report: 50 ms grid from Popen.wait(timeout) polling + 3:2 pair order at repeat 5; 2847f98 blocking wait + timer, repeat rounded to even; 555 tests
 2026-11-18 pymrm residual bench-newton head-slower 2.5 %: A/A test shows no tree/path bias (0.997); d7c4650 vs 3bf886c 0.971 wall, 0.973 cpu: real cumulative c2 slowdown vs ref-base; no tool change; pymrm to bisect
 2026-11-18 pymrm bisect: newton cost gradual (WO-c2-1 steps to 1.031, helper overhead; WO-c2-6 fixes), merge 4e44f37 numba cache=True ~2 % in cold runs (fresh NUMBA_CACHE_DIR per bench run); may raise cold-vs-warm at its campaign gate
+2026-11-18 pymrm gate-vs-direct bench mismatch = numba cache (gate cold by design); 9d30abf tier key cache = "warm"; a2: --json rejects a directory; 560 tests; pymrm seed-playbook lessons received (c2 playbook 8868150)
