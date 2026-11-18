@@ -103,3 +103,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-18 pymrm c2 S6 interface mode with literals_removed-only plan passed first time (S7, S8 too; package debt 358.5 -> 311.3); README: literal multiset is net over touched files
 2026-11-18 rule (3) notes closed: new brains matched as a name multiset ignoring lambda#k numbers (report.new_brains; diff, gate note, zones); README --target ambiguity, labels; think review; 552 tests; rescore all adopters (Peclet cpp@0 10899.5/89, cpp@1 9349.7/62 unchanged)
 2026-11-18 peclet-health: cpp@1 baseline gap is config (scope, zones, refs); nine-repo table to follow; keeps v0.3.0 tonight
+2026-11-18 pymrm-health bench report: 50 ms grid from Popen.wait(timeout) polling + 3:2 pair order at repeat 5; 2847f98 blocking wait + timer, repeat rounded to even; 555 tests

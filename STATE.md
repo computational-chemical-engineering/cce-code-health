@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-17)
 
-- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 552 tests on main after PR brain-multiset (new brains: name multiset, lambda numbers ignored).
+- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 555 tests. Since v0.4.0 on main: brain-multiset (PR #1), bench exact wall time + even repeat (2847f98).
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
