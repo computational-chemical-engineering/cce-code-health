@@ -97,6 +97,14 @@ channels, so S rises and the step fails, however far function debt falls. Making
 returning a NamedTuple, lowers S and earns 0.5 per write. A split into a new state class leaves the
 total unchanged and passes. `codehealth diff` gets the same ratchet over the branch.
 
+Known blind spot (pymrm c3 N3, 04a811e, 2026-11-18): a field moved into a helper object whose one
+method both writes and reads it (`_Residual.evaluate` counts `nfev`) stops being a channel, and the
+owner's read `self.residual.nfev` is not seen (no writer in the owner class), so S falls by its
+writers. Judged correct for a counter read only for reporting; it would hide coupling if the owner
+branched on it. Seeing it needs cross-class reads matched to writes (attribute name or type
+inference): a python@2 candidate, not a python@1 change. Adopter rule meanwhile: a moved field may
+be read from another object only for reporting, never for a control decision.
+
 ## 4. Short-block duplication (intra-file, AST)
 
 The step sequences in solve.py differ in access paths (`be` vs `self.be`) and constants, so no
