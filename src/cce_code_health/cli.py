@@ -16,7 +16,7 @@ from . import __version__, architecture, config, coupling, gitio, zones
 from . import gate as gatemod
 from .hook import cmd_hook
 from .duplication import duplicated_lines
-from .report import class_state_rises, new_file_smells
+from .report import class_state_rises, new_brains, new_file_smells
 from .python_backend import analyze
 from .report import file_report
 
@@ -166,18 +166,16 @@ def cmd_diff(a) -> int:
         failures.append(f"debt over touched files rose {db:.2f} -> {dh:.2f}")
     failures += new_errors(rb, rh, ch)
     counterpart = {c[2]: c[1] for c in ch if c[2]}
-    base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
     smell_errors, smell_notes = new_file_smells(rb, rh, ch)
     failures += smell_errors
     failures += class_state_rises(rb, rh, ch)
     rows = []
+    for path, f in new_brains(rb, rh, ch):
+        bm = cfg.profile_for(path).brain_metric
+        failures.append(f"{path}:{f['line']} {f['name']}: new brain function "
+                        f"({bm} {f[bm]}, nloc {f['nloc']})")
     for path, r in sorted(rh.items()):
         old = rb.get(counterpart.get(path) or "")
-        for f in r["functions"]:
-            if f["brain"] and f["name"] not in base_brains:
-                bm = cfg.profile_for(path).brain_metric
-                failures.append(f"{path}:{f['line']} {f['name']}: new brain function "
-                                f"({bm} {f[bm]}, nloc {f['nloc']})")
         old_sup = {(tuple(s["smells"]), s["reason"]) for s in (old["suppressions"] if old else [])}
         for s in r["suppressions"]:
             if not s["valid"]:
@@ -190,7 +188,7 @@ def cmd_diff(a) -> int:
         if abs(d1 - d0) > EPS:
             name = hp if bp in (None, hp) else f"{bp} -> {hp}"
             rows.append(f"  {st} {name}: debt {d0:.1f} -> {d1:.1f}")
-    zc = zones.compare(rb, rh, cfg.zones) if cfg.zones else None
+    zc = zones.compare(rb, rh, cfg.zones, ch) if cfg.zones else None
     rows += [f"  zone {z}: debt {x['debt_before']:.1f} -> {x['debt_after']:.1f}, new brains {x['new_brains']}"
              for z, x in (zc or {}).items()]
     arch = architecture.compare_refs(repo, base, head, cfg)   # None without [architecture]

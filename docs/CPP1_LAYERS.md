@@ -112,9 +112,9 @@ unchanged in all 263 C++ files; per zone (zones trial config, cpp@1 without capt
 - The lambda is scored on its original lines (the prototype pulled the body up to the head line:
   one or two NLOC less for a `{` or specifiers on their own line).
 
-Open notes (review): new brains are matched on the bare name across files (gate.py:1430,
-cli.py:169, zones.py:144), so a repeated `run::lambda#1` elsewhere can hide a new brain; matching
-on qualname would be stricter. A short `--target path::compute` can be ambiguous when a Kokkos
+Open notes (review): new brains were matched on the bare name across files, so a repeated
+`run::lambda#1` elsewhere could hide a new brain. Resolved 2026-11-18: `report.new_brains` matches
+names as a multiset over the touched files (moves still pass; diff, gate note and zones share it). A short `--target path::compute` can be ambiguous when a Kokkos
 label repeats the parent's name. Adding an unlabelled kernel above others renumbers `lambda#k`
 (advise labels). cpp@0 suppressions on a parent's head do not cover its lambdas. A lambda's head
 scan also crosses a braceless `for (...)` line above the launch (suppression slightly wider).

@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 
 from . import config
+from .report import new_brains
 
 IDENT = re.compile(r"[A-Za-z_]\w*")
 
@@ -140,16 +141,15 @@ def table(zt: dict[str, dict]) -> list[str]:
     return rows
 
 
-def compare(rb: dict[str, dict], rh: dict[str, dict], rules: list[dict]) -> dict[str, dict]:
+def compare(rb: dict[str, dict], rh: dict[str, dict], rules: list[dict], changes=()) -> dict[str, dict]:
     """Per zone over the touched files: debt before and after, and the head's new brain
-    functions (a brain whose name no base function had as a brain, as diff and gate judge it)."""
-    base_brains = {f["name"] for r in rb.values() for f in r["functions"] if f["brain"]}
+    functions (report.new_brains, as diff and gate judge them; `changes` pairs renamed files)."""
+    fresh = [f for _, f in new_brains(rb, rh, changes)]
     out = {}
     for z in list(dict.fromkeys(_names(rules, rb) + _names(rules, rh))):
         before = sum(f["debt"] for r in rb.values() for f in r["functions"] if f["zone"] == z)
         after = sum(f["debt"] for r in rh.values() for f in r["functions"] if f["zone"] == z)
-        new = sum(f["brain"] and f["name"] not in base_brains
-                  for r in rh.values() for f in r["functions"] if f["zone"] == z)
+        new = sum(f["zone"] == z for f in fresh)
         out[z] = {"debt_before": round(before, 3), "debt_after": round(after, 3), "new_brains": new}
     return out
 
