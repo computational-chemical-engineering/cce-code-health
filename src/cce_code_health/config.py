@@ -124,10 +124,22 @@ SCOPE_KEYS = {"include", "exclude"}
 GATE_KEYS = {"frozen", "frozen_cmd", "forbid", "literals", "public_api", "no_implicit_reexport", "keep_going", "prefix",
              "env", "tier", "flags", "flag_patterns"}
 TIER_KEYS = {"name", "cadence", "kind", "cmd", "outputs", "tolerance", "timeout", "primary",
-             "min_speedup", "max_slowdown", "metric", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit",
+             "min_speedup", "max_slowdown", "metric", "cache", "repeat", "max_repeat", "modes", "behaviour", "coverage", "detect_exit",
              "skip_exit", "fail_regex", "same_lines", "format", "ignore_exit", "order", "band", "last"}
 KINDS = ("command", "reference", "benchmark", "findings", "convergence")
 THREAD_PINS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+BENCH_ENUMS = {"metric": ("wall", "cpu", "both"), "cache": ("cold", "warm")}   # first is the default
+
+
+def _bench_enum_problems(t: dict, kind: str, where: str) -> list[str]:
+    """Benchmark-only keys with a fixed set of values (BENCH_ENUMS)."""
+    out = []
+    for key, allowed in BENCH_ENUMS.items():
+        if key in t and (kind != "benchmark" or t[key] not in allowed):
+            names = [f'"{allowed[0]}" (default)'] + [f'"{v}"' for v in allowed[1:]]
+            out.append(f"{where}: {key} is for benchmark tiers: {', '.join(names[:-1])} or {names[-1]}, "
+                       f"got {t[key]!r}")
+    return out
 
 
 def check(text: str) -> tuple[list[str], list[str]]:
@@ -206,9 +218,7 @@ def check(text: str) -> tuple[list[str], list[str]]:
             from .compare import TOLERANCE_KEYS  # noqa: PLC0415
             bad += [f"{where}: unknown tolerance key {k!r} (allowed: {', '.join(TOLERANCE_KEYS)})"
                     for k in sorted(set(t.get("tolerance", {})) - set(TOLERANCE_KEYS))]
-        if "metric" in t and (kind != "benchmark" or t["metric"] not in ("wall", "cpu", "both")):
-            bad.append(f"{where}: metric is for benchmark tiers: \"wall\" (default), \"cpu\" or \"both\", "
-                       f"got {t['metric']!r}")
+        bad += _bench_enum_problems(t, kind, where)
         de = t.get("detect_exit")
         if de is not None and not (isinstance(de, list) and de and all(
                 isinstance(x, int) and not isinstance(x, bool) and x != 0 for x in de)):

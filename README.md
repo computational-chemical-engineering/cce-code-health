@@ -319,7 +319,7 @@ accepted when the 95 % distribution-free lower bound of the median paired speedu
 4 x `repeat`). A benchmark tier's `metric` picks what is timed: `"wall"` (default), `"cpu"`
 (the children's user+sys CPU seconds, which a loaded machine inflates far less; it misses I/O,
 GPU and sleep, and counts every thread, so a parallel speedup does not show) or `"both"` (a
-slowdown guard fails only when both slow down; a speedup claim needs both). An informational `numeric-literals` check lists numeric constants removed or
+slowdown guard fails only when both slow down; a speedup claim needs both). A benchmark tier's `cache` is `"cold"` (default: every run gets a fresh XDG_CACHE_HOME and NUMBA_CACHE_DIR, so numba compiles, and writes its `cache=True` cache, in every timed run) or `"warm"` (each side keeps one cache directory for the tier, filled by the warm-up: the timed runs measure steady state, as a user with a cache sees it; TMPDIR stays fresh per run). An informational `numeric-literals` check lists numeric constants removed or
 added. `[gate] prefix` prepends a shell prefix to every tier command; `{gitdir}` and `{repo}`
 work in `prefix` and `[gate.env]`.
 With `--config` (a trial) a passing gate prints `GATE TRIAL` and exits 3; a `--config` file

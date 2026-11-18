@@ -192,3 +192,10 @@ def test_warmup_writing_ignored_cache_is_noted(repo, capsys):
     out = capsys.readouterr().out
     assert "warm-up wrote ignored files into the tree" in out
     assert "pkg/__pycache__/mod.calc.nbi" in out and ".pyc" not in out
+
+
+def test_cache_only_for_benchmarks_and_cold_or_warm(repo, capsys):
+    bad = CONFIG.replace('outputs = ["r.txt"]', 'outputs = ["r.txt"]\ncache = "warm"')
+    commit(repo, {".codehealth/config.toml": bad})
+    assert main(["config", "--check", "--repo", str(repo)]) != 0
+    assert "cache is for benchmark tiers" in capsys.readouterr().out

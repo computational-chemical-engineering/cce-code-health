@@ -38,6 +38,7 @@ Configured in the base's `.codehealth/config.toml` (a change cannot loosen its o
     min_speedup = 1.2
     max_slowdown = 0.03               # every other benchmark tier: may not slow down beyond this
     metric = "wall"                   # "cpu": children user+sys CPU time; "both": see below
+    cache = "cold"                    # "warm": each side keeps one XDG_CACHE_HOME/NUMBA_CACHE_DIR
 
 Placeholders in cmd: {repo} {base} {ref_base} {out} {files} (touched head paths, shell-quoted, any
 type: docs and data too) and {files:GLOB[,GLOB]} (only those matching, e.g. {files:*.py} for a linter;
@@ -1140,10 +1141,13 @@ def _ignored(cwd: Path) -> set[str]:
             if ln.startswith("!! ") and not ln.endswith((".pyc", ".pyo"))}
 
 
-def _bench_run(t, cwd, base, files, env, log) -> tuple[int, float, float, str]:
-    """One run with fresh TMPDIR, XDG_CACHE_HOME and NUMBA_CACHE_DIR (numba's cache=True would
+def _bench_run(t, cwd, base, files, env, log, cache: str | None = None) -> tuple[int, float, float, str]:
+    """One run with a fresh TMPDIR, and XDG_CACHE_HOME and NUMBA_CACHE_DIR under `cache` (a side's
+    kept directory with `cache = "warm"`), else under a fresh one (numba's cache=True would
     otherwise write next to the source): (rc, seconds, children CPU s, note)."""
-    tmp, cache = tempfile.mkdtemp(prefix="codehealth-tmp-"), tempfile.mkdtemp(prefix="codehealth-cache-")
+    tmp = tempfile.mkdtemp(prefix="codehealth-tmp-")
+    fresh = cache is None
+    cache = tempfile.mkdtemp(prefix="codehealth-cache-") if fresh else cache
     try:
         before = _status(cwd)
         r0 = resource.getrusage(resource.RUSAGE_CHILDREN)
@@ -1157,7 +1161,8 @@ def _bench_run(t, cwd, base, files, env, log) -> tuple[int, float, float, str]:
         return rc, sec, cpu, note
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        shutil.rmtree(cache, ignore_errors=True)
+        if fresh:
+            shutil.rmtree(cache, ignore_errors=True)
 
 
 def speedup_lower_bound(ratios, confidence: float = 0.95) -> tuple[float, bool]:
@@ -1197,7 +1202,8 @@ def _warm_up(t, sides: dict, args: dict) -> tuple[str, str]:
     warm = []
     for side, cwd in sides.items():
         before = _ignored(cwd)
-        rc, _, _, _ = _bench_run(t, cwd, args["base"], args["files"], args["env"], args["log"])
+        rc, _, _, _ = _bench_run(t, cwd, args["base"], args["files"], args["env"], args["log"],
+                                 args["caches"].get(side))
         if rc != 0:
             return f"exit {rc} at {side} (warm-up)", ""
         new = sorted(_ignored(cwd) - before)
@@ -1214,11 +1220,24 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
     of base_i / head_i. Primary tier in optimize mode: accepted when the lower confidence bound
     of the median reaches min_speedup; if only the median does, ABBA rounds (2 runs per side)
     are added until the bound passes or n reaches max_repeat (default 4 * repeat)."""
+    sides = {"base": get_tree(), "head": ctx.repo}
+    caches = ({s: tempfile.mkdtemp(prefix=f"codehealth-cache-{s}-") for s in sides}
+              if t.get("cache") == "warm" else {})
+    try:
+        return _benchmark_runs(t, ctx, sides, caches)
+    finally:
+        for c in caches.values():
+            shutil.rmtree(c, ignore_errors=True)
+
+
+def _benchmark_runs(t, ctx: Ctx, sides: dict, caches: dict) -> tuple[bool, str]:
+    """_benchmark's runs; `caches`: {side: kept cache directory} with `cache = "warm"`, else {}."""
     repeat = int(t.get("repeat", 5))
     repeat += repeat % 2    # even: each side runs first equally often (an order effect cancels)
-    sides = {"base": get_tree(), "head": ctx.repo}
-    args = dict(base=ctx.ref_base, files=ctx.files, env=ctx.env, log=ctx.log)
+    args = dict(base=ctx.ref_base, files=ctx.files, env=ctx.env, log=ctx.log, caches=caches)
     err, warm_note = _warm_up(t, sides, args)
+    if caches:
+        warm_note += "; warm cache (one XDG_CACHE_HOME and NUMBA_CACHE_DIR per side, filled by the warm-up)"
     if err:
         return False, err
     times, cpu = {"base": [], "head": []}, {"base": [], "head": []}
@@ -1228,7 +1247,7 @@ def _benchmark(t, ctx: Ctx, get_tree) -> tuple[bool, str]:
         for i in range(count):
             for side in (("base", "head") if i % 2 == 0 else ("head", "base")):
                 rc, sec, c, note = _bench_run(t, sides[side], args["base"], args["files"],
-                                              args["env"], args["log"])
+                                              args["env"], args["log"], caches.get(side))
                 if rc != 0:
                     return f"exit {rc} at {side}"
                 if note:
