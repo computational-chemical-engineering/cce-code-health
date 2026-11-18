@@ -90,3 +90,4 @@ def test_warm_cache_reaches_the_command(monkeypatch, tmp_path):
                                     lambda: tmp_path / "base")
             hits = tmp_path / f"hits-{cache}"
             assert (len(hits.read_text().split()) if hits.exists() else 0) == want
+

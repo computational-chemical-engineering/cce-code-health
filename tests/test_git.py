@@ -129,3 +129,10 @@ def test_commit_counts_follow_renames(repo):
     commit(repo, {"pkg/z.py": SIMPLE + "\n# edit 2\n"})
     counts = gitio.commit_counts(repo)
     assert counts["pkg/z.py"] == 4 and "pkg/a.py" not in counts
+
+
+def test_json_to_a_directory_is_a_clear_usage_error(tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["scan", "--repo", str(tmp_path), "--json", str(tmp_path)])
+    err = capsys.readouterr().err
+    assert e.value.code == 2 and "is a directory" in err and "--repo" in err

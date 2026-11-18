@@ -147,6 +147,15 @@ def cmd_scan(a) -> int:
     return 0
 
 
+def _json_out(path: str) -> str:
+    """argparse type of --json: an output file, never an existing directory (scan, diff and
+    the others take no path argument, so `--json src/pkg` meant the tree, not the report)."""
+    if Path(path).is_dir():
+        raise argparse.ArgumentTypeError(f"{path} is a directory; --json takes the report file to "
+                                         f"write (the repository is chosen with --repo)")
+    return path
+
+
 def cmd_diff(a) -> int:
     repo = Path(a.repo).resolve()
     head = gitio.rev(repo, a.head) if a.head else None
@@ -777,7 +786,7 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name, help=help_)
         p.set_defaults(fn=fn)
         p.add_argument("--repo", default=".")
-        p.add_argument("--json", help="write the full report to this file")
+        p.add_argument("--json", type=_json_out, help="write the full report to this file")
         if name in ("scan", "hotspots", "arch"):
             p.add_argument("--top", type=int, default=20 if name != "arch" else 50)
             p.add_argument("--config", dest="trial_config",
@@ -785,7 +794,7 @@ def main(argv: list[str] | None = None) -> int:
     pk = sub.add_parser("coupling", help="change coupling: files that change together in history")
     pk.set_defaults(fn=cmd_coupling)
     pk.add_argument("--repo", default=".")
-    pk.add_argument("--json", help="write the full report to this file")
+    pk.add_argument("--json", type=_json_out, help="write the full report to this file")
     pk.add_argument("--since", help="only use commits since this date")
     pk.add_argument("--max-files-per-commit", type=int, default=30, help="skip larger commits (default 30)")
     pk.add_argument("--min-shared", type=int, default=5, help="min shared commits (default 5)")
@@ -799,7 +808,7 @@ def main(argv: list[str] | None = None) -> int:
     pd = sub.add_parser("docs", help="documentation references: broken paths, anchors, test ids, Python names")
     pd.set_defaults(fn=cmd_docs)
     pd.add_argument("--repo", default=".")
-    pd.add_argument("--json", help="write the full report to this file")
+    pd.add_argument("--json", type=_json_out, help="write the full report to this file")
     pd.add_argument("--ref", help="commit to analyse (default: working tree)")
     pd.add_argument("--stats", action="store_true", help="counts per docs class, kind, status and reason")
     pd.add_argument("--top", type=int, default=30, help="broken references (or --stale docs) to list")
@@ -815,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
     pc = sub.add_parser("config", help="validate the gate configuration")
     pc.set_defaults(fn=cmd_config)
     pc.add_argument("--repo", default=".")
-    pc.add_argument("--json", help=argparse.SUPPRESS)
+    pc.add_argument("--json", type=_json_out, help=argparse.SUPPRESS)
     pc.add_argument("--check", action="store_true", help="validate .codehealth/config.toml")
     pc.add_argument("--config", help="validate this file instead of the working tree's config")
     ph = sub.add_parser("hook", help="Claude Code PostToolUse hook: per-file debt feedback from stdin JSON")
@@ -824,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
     pst = sub.add_parser("stats", help="playbook statistics per recipe from campaign run logs")
     pst.set_defaults(fn=cmd_stats)
     pst.add_argument("--repo", default=".")
-    pst.add_argument("--json", help="write the full report to this file")
+    pst.add_argument("--json", type=_json_out, help="write the full report to this file")
     pst.add_argument("--runs", nargs="+", help="run-log files or directories (default: the live log under "
                      "<git-common-dir>/codehealth/runs and .codehealth/runs)")
     pst.add_argument("--campaign", nargs="+", help="only these campaigns")
