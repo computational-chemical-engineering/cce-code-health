@@ -104,3 +104,4 @@ Open decisions: scope of refactor (src only vs also tests/scripts/docs); CodeSce
 2026-11-18 rule (3) notes closed: new brains matched as a name multiset ignoring lambda#k numbers (report.new_brains; diff, gate note, zones); README --target ambiguity, labels; think review; 552 tests; rescore all adopters (Peclet cpp@0 10899.5/89, cpp@1 9349.7/62 unchanged)
 2026-11-18 peclet-health: cpp@1 baseline gap is config (scope, zones, refs); nine-repo table to follow; keeps v0.3.0 tonight
 2026-11-18 pymrm-health bench report: 50 ms grid from Popen.wait(timeout) polling + 3:2 pair order at repeat 5; 2847f98 blocking wait + timer, repeat rounded to even; 555 tests
+2026-11-18 pymrm residual bench-newton head-slower 2.5 %: A/A test shows no tree/path bias (0.997); d7c4650 vs 3bf886c 0.971 wall, 0.973 cpu: real cumulative c2 slowdown vs ref-base; no tool change; pymrm to bisect
