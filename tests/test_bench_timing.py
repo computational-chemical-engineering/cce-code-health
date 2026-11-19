@@ -18,7 +18,8 @@ def test_run_waits_without_poll_timeout(monkeypatch, tmp_path):
     with open(tmp_path / "log", "w") as log:
         rc, sec = gate._run("sleep 0.07", tmp_path, {}, log, timeout=30)
     assert rc == 0 and calls and all(c is None for c in calls)
-    assert sec < 0.1      # was ~0.113 or more on the polling grid
+    # the blocking wait (timeout None) is the check; wall time only bounded loosely (CI runners stall)
+    assert 0.07 <= sec < 5
 
 
 def test_run_timeout_still_kills_and_returns_124(tmp_path):
