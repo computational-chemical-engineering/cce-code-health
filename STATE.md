@@ -23,6 +23,10 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
     peclet_health and plans suite-wide work; status digest sent 2026-11-17 (per-package numbers,
     cpp@0 limits, cpp@1 ideas for device code). Builds and tests on TRS2 only through it. Owes its nine-repo cpp@1 table at one ref set (informational).
   - DSMC (new 2026-11-18, ~/Documents/DSMC, branch master): adopted 3e0cb7e, python@1, ruff/nbstripout. Nothing open.
+  - agentic_science (TR09, ~/Code/agentic-science, private; new 2026-11-19): benchmarks open-weight
+    models on pymrm-gallery pages; scores with scan + bench/codehealth.toml (python@1, one page,
+    module_nloc share), TR09 executable. Will send (a) weak-model refactor-step trial brief and
+    results, then (b) arms none / short rules / rules + scan feedback. Fold findings into the playbook.
   - pymrm c3: class-state cross-object read is a known blind spot, python@2 candidate (docs/py1/design.md section 3).
 
 ## Next action
