@@ -77,6 +77,15 @@ side effects and floating-point operations, same exceptions and messages.
   (`_t4`, `_exp`, `_row_rows`); the step trades cognitive debt for parameter debt and the page
   reads worse (agentic_science t9, Qwen3.6: debt 35.5 -> 22.0, two 8-parameter helpers, while
   two other models reached 11.0 with helpers named by content).
+- **Tuple bag for a parameter target**: `props = (rho, nu, gam, DL)` built by the caller and
+  unpacked on the first line of the callee (or a dict `{**K, "c1": c1}`). The parameter count
+  falls and python@1 scores it as a gain, but the coupling is the same and positional order is
+  now an unchecked contract. A parameter-count target is met only by `parameter-object` (a named,
+  preferably frozen dataclass for one concept) or by removing a parameter the function does not
+  need; otherwise leave the parameters alone. Also reject moving part of a formula to the call
+  site to shorten a signature: it regroups floating-point terms. agentic_science t10: 18 of 20
+  parameter cuts by three open-weight models were tuple bags, 1 a dict bag, 0 used a dataclass
+  although the page had a frozen dataclass as an example.
 - **Fixing findings by rote** (C++): a refactor step never changes a parameter or capture
   only to silence a clang-tidy check. Example: `performance-unnecessary-value-param` on
   `Kokkos::View` parameters; Views are reference-counted handles passed by value on purpose
@@ -92,3 +101,12 @@ agentic_science t9 (2026-11-19, one extract-phase step on a pymrm-gallery page, 
 open-weight models, n = 1 each, all printed output as the gate): all three kept output identical;
 two reached debt 35.5 -> 11.0 with named helpers, one 35.5 -> 22.0 with long parameter lists; no
 fragmenting, no logic moved to module level, no gate edits.
+agentic_science t10 (2026-11-19, same page, three steps, gate = page runs and five summary
+values at 5 digits; graded on all 240 printed lines): all steps passed the weak gate, but two of
+three models changed behaviour silently (13 break-table rows changed in step 1; a dropped `log`
+argument in step 3), and step-1 helpers grew to 8 to 13 parameters where the full-output gate of
+t9 gave clean helpers. A third model regrouped floating-point terms that neither check saw at 5
+digits. Lessons: a gate that compares a few summary values is not a refactor gate; compare all
+outputs at full precision (bitwise) and run the mutation self-test on the target. A
+perturbation table (perturb an input, count the claims that fail) exposed both behaviour
+changes and is a cheap reference tier for script-like pages.

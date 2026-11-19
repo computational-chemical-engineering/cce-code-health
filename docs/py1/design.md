@@ -112,6 +112,13 @@ module NLOC share 0.70 to 0.89 against 0.55 for the reference page. Seeing it ne
 (cognitive, nesting, bumps of the top-level body): a python@2 candidate. Meanwhile, report
 module NLOC share (file nloc minus the sum of function nloc) next to debt for script-like files.
 
+Known blind spot (agentic_science t10, 2026-11-19): a tuple or dict parameter that is only
+unpacked in the callee's first statement (`rho, nu, gam, DL = props`) counts as one parameter, so
+a tuple bag scores as a gain (18 of 20 open-weight parameter cuts). python@2 candidate: a
+parameter whose only use is unpacking in the first statement counts as its arity (subscripts
+`K["c1"]` of a dict parameter: as its distinct keys). Meanwhile review rejects it (seed playbook,
+anti-pattern "Tuple bag for a parameter target").
+
 ## 4. Short-block duplication (intra-file, AST)
 
 The step sequences in solve.py differ in access paths (`be` vs `self.be`) and constants, so no

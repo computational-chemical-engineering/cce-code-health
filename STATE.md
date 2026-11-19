@@ -26,8 +26,8 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
   - agentic_science (TR09, ~/Code/agentic-science, private; new 2026-11-19): benchmarks open-weight
     models on pymrm-gallery pages; scores with scan + bench/codehealth.toml (python@1, one page,
     module_nloc share), TR09 executable. Will send (a) weak-model refactor-step trial brief and
-    results (t9 done, recorded 114b31a), t10 weak-gate 3-step trial running (asked: how params were cut,
-    meaningful object vs packing/globals), then (b) arms none / short rules / rules + scan feedback. Fold findings into the playbook.
+    results (t9 recorded 114b31a, t10 weak gate recorded in seed playbook + py1 design: tuple bags,
+    silent behaviour changes), then (b) arms none / short rules / rules + scan feedback. Fold findings into the playbook.
   - pymrm c3: class-state cross-object read is a known blind spot, python@2 candidate (docs/py1/design.md section 3).
 
 ## Next action
