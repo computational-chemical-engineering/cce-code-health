@@ -105,6 +105,13 @@ branched on it. Seeing it needs cross-class reads matched to writes (attribute n
 inference): a python@2 candidate, not a python@1 change. Adopter rule meanwhile: a moved field may
 be read from another object only for reporting, never for a control decision.
 
+Known blind spot (agentic_science, 2026-11-19): module-level code (top-level statements of a
+script or a jupytext py:percent page) counts toward file NLOC and large_file but carries no
+function debt, so a page written as top-level cells scores low debt. Open-weight page builds had
+module NLOC share 0.70 to 0.89 against 0.55 for the reference page. Seeing it needs a module unit
+(cognitive, nesting, bumps of the top-level body): a python@2 candidate. Meanwhile, report
+module NLOC share (file nloc minus the sum of function nloc) next to debt for script-like files.
+
 ## 4. Short-block duplication (intra-file, AST)
 
 The step sequences in solve.py differ in access paths (`be` vs `self.be`) and constants, so no

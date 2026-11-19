@@ -73,7 +73,10 @@ side effects and floating-point operations, same exceptions and messages.
   debt 332.1 -> 331.2. Group the inputs with `parameter-object` (C++: a launch-params struct)
   first, or extract a smaller phase. In C++ the same coupling can hide in a lambda that
   captures the caller's locals by reference (`[&]`): the metric does not count captures, so
-  review does.
+  review does. Smaller form: helpers of 6 to 8 parameters named by position, not content
+  (`_t4`, `_exp`, `_row_rows`); the step trades cognitive debt for parameter debt and the page
+  reads worse (agentic_science t9, Qwen3.6: debt 35.5 -> 22.0, two 8-parameter helpers, while
+  two other models reached 11.0 with helpers named by content).
 - **Fixing findings by rote** (C++): a refactor step never changes a parameter or capture
   only to silence a clang-tidy check. Example: `performance-unnecessary-value-param` on
   `Kokkos::View` parameters; Views are reference-counted handles passed by value on purpose
@@ -85,3 +88,7 @@ accepted, 5 gate-fails, 1 review-reject; 4 module splits all met their planned a
 reviews 1 to 11, 2 rejects (its .codehealth/playbook.md has the per-entry evidence); Peclet dem S1
 (2026-11-13), 3 extract-phase steps on demSolveContacts, all accepted; Peclet dem S2 (2026-11-13),
 3 launch-params-struct steps (12 halo kernels), all accepted on the first gate, debt 1858.2 -> 1799.3.
+agentic_science t9 (2026-11-19, one extract-phase step on a pymrm-gallery page, three
+open-weight models, n = 1 each, all printed output as the gate): all three kept output identical;
+two reached debt 35.5 -> 11.0 with named helpers, one 35.5 -> 22.0 with long parameter lists; no
+fragmenting, no logic moved to module level, no gate edits.
