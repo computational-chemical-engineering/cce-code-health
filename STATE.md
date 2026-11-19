@@ -8,20 +8,22 @@ refactor-loop, optimize-loop and healthy-coding skills) that raises code health 
 changing behaviour and builds its own playbook; importable into any repo.
 Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
-## Position (2026-11-17)
+## Position (2026-11-19)
 
-- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 560 tests. Since v0.4.0 on main: brain-multiset (PR #1), bench exact wall time + even repeat (2847f98), bench `cache = "warm"` (9d30abf), --json usage check.
+- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 569 tests. Since v0.4.0 on main: brain-multiset (PR #1), bench exact wall time + even repeat (2847f98), bench `cache = "warm"` (9d30abf), --json usage check, interface private `changed` + `adapted` caller defs (34a30bf, src/cce_code_health/adapted.py), flaky timing bound dropped (ae392aa).
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
   - OpenFlowsheet S19 (repo-wide, W4 interface lane): re-pins to cf15245 for I-12a/I-12c (text
-    callers follow `from M import` moves; private names may be renamed); `[gate] no_implicit_reexport` set. Nothing open.
+    callers follow `from M import` moves; private names may be renamed); `[gate] no_implicit_reexport` set. 2026-11-19: its private-signature gap answered by 34a30bf (private `changed`, `adapted`); it may repin. Nothing open.
   - pymrm c1 closed locally (debt 1282.8 -> 80.0, health 5.82 -> 9.57); its push waits
     for a Desk sign-off. Its trial-config report fixed in cc00407. Lane c1-opt: numba reports fixed
     2026-11-17 (5d9f1a0 bench NUMBA_CACHE_DIR, 240294e coverage of called numba functions); it re-gates opt-O1b.
   - Peclet (v0.3.0 pinned 2026-11-17, baseline cpp@1 9619.1 / 64; gates switch to cpp@1 with its next WO): session peclet-health (TRS2) replaces
     peclet_health and plans suite-wide work; status digest sent 2026-11-17 (per-package numbers,
-    cpp@0 limits, cpp@1 ideas for device code). Builds and tests on TRS2 only through it. Nothing open.
+    cpp@0 limits, cpp@1 ideas for device code). Builds and tests on TRS2 only through it. Owes its nine-repo cpp@1 table at one ref set (informational).
+  - DSMC (new 2026-11-18, ~/Documents/DSMC, branch master): adopted 3e0cb7e, python@1, ruff/nbstripout. Nothing open.
+  - pymrm c3: class-state cross-object read is a known blind spot, python@2 candidate (docs/py1/design.md section 3).
 
 ## Next action
 
