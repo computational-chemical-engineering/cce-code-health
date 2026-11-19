@@ -11,11 +11,12 @@ mode needs `[gate] public_api = true` (usage error otherwise):
                "src/pkg/compat.py"]               # a path alone: the whole module goes
     renamed = {"src/pkg/a.py:Solver" = "src/pkg/core/solver.py:Solver",   # path:Name -> path:Name
                "src/pkg/b.py" = "src/pkg/core/b.py"}                      # module -> module
-    changed = ["src/pkg/run.py:run"]              # same name and module, new signature
+    changed = ["src/pkg/run.py:run"]              # same name and module, new signature (or private)
     added = ["src/pkg/core/solver.py:make_solver",   # new public names that are not renames
              "src/pkg/run.py:__all__"]       # __all__ given to an existing module (removed: taken away)
     new_files = ["src/pkg/core/*.py"]             # globs; added files must match one
     callers = ["tests/**", "docs/examples/**"]    # out-of-scope or forbidden files that follow
+    adapted = ["tests/t.py:test_x.fake"]          # caller defs that follow a signature (adapted.py)
 
 Static rules that differ from refactor mode:
 - `plan`: every added in-scope file matches `new_files`; every touched path outside the scope
@@ -48,10 +49,11 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
-from . import config, gitio
+from . import adapted, config, gitio
 
 PLAN_DIR = ".codehealth/interface/"
 PLAN_KEYS = {"id", "approved_by", "reason", "removed", "renamed", "retargeted", "changed", "added", "new_files",
+             "adapted",
              "callers", "literals_added", "literals_removed"}
 LITERAL_KEYS = {"file", "literal", "count", "reason"}
 
@@ -67,6 +69,23 @@ def _entry_ok(e: str) -> bool:
     """`path.py` or `path.py:Name[.member]`."""
     path, _, name = e.partition(":")
     return path.endswith(".py") and (":" not in e or (bool(name) and ":" not in name))
+
+
+def _literal_entry_problems(where: str, e: dict, cfg: config.Config) -> list[str]:
+    bad = [f"{where}: unknown key {x!r}" for x in sorted(set(e) - LITERAL_KEYS)]
+    f = e.get("file")
+    if not (isinstance(f, str) and f.endswith(".py") and ":" not in f and "*" not in f):
+        bad.append(f"{where}: file must be one path/to/file.py (no glob)")
+    elif not cfg.in_scope(f):
+        bad.append(f"{where}: file {f!r} is out of scope")
+    if not isinstance(e.get("literal"), str):
+        bad.append(f"{where}: literal must be a string (the exact value)")
+    c = e.get("count", 1)
+    if not (isinstance(c, int) and not isinstance(c, bool) and c > 0):
+        bad.append(f"{where}: count must be a positive integer")
+    if not (isinstance(e.get("reason"), str) and e["reason"].strip()):
+        bad.append(f"{where}: reason must be a non-empty string")
+    return bad
 
 
 def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
@@ -85,7 +104,7 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
     for k in ("id", "approved_by", "reason"):
         if not isinstance(data.get(k), str) or not data[k].strip():
             bad.append(f"{k} must be a non-empty string")
-    for k in ("removed", "changed", "added", "new_files", "callers"):
+    for k in ("removed", "changed", "added", "new_files", "callers", "adapted"):
         v = data.get(k, [])
         if not isinstance(v, list) or not all(isinstance(x, str) and x for x in v):
             bad.append(f"{k} must be a list of strings")
@@ -115,6 +134,7 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
     names = [e for e in [*removed, *changed, *added, *ren, *ret] if ":" in e]
     bad += [f"entry {e!r} is listed twice" for e in sorted({e for e in names if names.count(e) > 1})]
     bad += [f"new_files entry {g!r} is out of scope" for g in data.get("new_files", []) if not cfg.in_scope(g)]
+    bad += adapted.plan_problems(data, _entry_ok)
     for g in data.get("callers", []):
         if g.strip("*/") == "" or config.match(".codehealth/x.toml", g):
             bad.append(f"callers entry {g!r} is too broad (it would cover .codehealth/ or everything)")
@@ -125,20 +145,7 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
             lits[k] = []
             continue
         for i, e in enumerate(v, 1):
-            where = f"{k}[{i}]"
-            bad += [f"{where}: unknown key {x!r}" for x in sorted(set(e) - LITERAL_KEYS)]
-            f = e.get("file")
-            if not (isinstance(f, str) and f.endswith(".py") and ":" not in f and "*" not in f):
-                bad.append(f"{where}: file must be one path/to/file.py (no glob)")
-            elif not cfg.in_scope(f):
-                bad.append(f"{where}: file {f!r} is out of scope")
-            if not isinstance(e.get("literal"), str):
-                bad.append(f"{where}: literal must be a string (the exact value)")
-            c = e.get("count", 1)
-            if not (isinstance(c, int) and not isinstance(c, bool) and c > 0):
-                bad.append(f"{where}: count must be a positive integer")
-            if not (isinstance(e.get("reason"), str) and e["reason"].strip()):
-                bad.append(f"{where}: reason must be a non-empty string")
+            bad += _literal_entry_problems(f"{k}[{i}]", e, cfg)
         pairs = [(e.get("file"), e.get("literal")) for e in v if isinstance(e, dict)]
         bad += [f"{k}: {f}: {lit!r} is listed twice" for f, lit in sorted({x for x in pairs if pairs.count(x) > 1},
                                                                           key=repr)]
@@ -151,6 +158,7 @@ def load_plan(repo: Path, base: str, path: str, cfg: config.Config) -> dict:
             "removed": list(removed), "renamed": dict(ren), "retargeted": dict(ret), "changed": list(changed),
             "added": list(added),
             "new_files": list(data.get("new_files", [])), "callers": list(data.get("callers", [])),
+            "adapted": list(data.get("adapted", [])),
             "literals_added": [{**e, "count": e.get("count", 1)} for e in lits["literals_added"]],
             "literals_removed": [{**e, "count": e.get("count", 1)} for e in lits["literals_removed"]],
             "path": path, "blob": blob}
@@ -507,6 +515,16 @@ def _private_rename(po, no, pn, nn, tb, th, still_bound) -> list[str]:
     return []
 
 
+def _private_split(changed: dict, py, api_b: dict, api_h: dict) -> tuple[dict, list]:
+    """`changed` entries split into public ones {path: names} and private (path, name) pairs, which
+    are in neither API and are checked on their defs (adapted.private_changed)."""
+    bp_of = {h: b for b, h in py}
+    private = sorted((p, n) for p, ns in changed.items() for n in ns
+                     if n not in api_b.get(bp_of.get(p, p), {}) and n not in api_h.get(p, {}))
+    public = {p: {n for n in ns if (p, n) not in private} for p, ns in changed.items()}
+    return public, private
+
+
 def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
                         homes: dict | None = None, roots=("src", "."),
                         own_use_imports: bool = False) -> tuple[list[str], dict]:
@@ -526,7 +544,9 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
             if n is not None:
                 out.setdefault(p, set()).add(n)
         return out
-    removed, changed, added = entries("removed"), entries("changed"), entries("added")
+    removed, added = entries("removed"), entries("added")
+    changed, private = _private_split(entries("changed"), py, api_b, api_h)
+    problems = adapted.private_entries(private, tb, th, record["changed"])
     removed_mod = {p for p, n in map(_split, plan["removed"]) if n is None}
     ren_mod = {o: n for o, n in plan["renamed"].items() if ":" not in o}
     ren = [(*_split(o), *_split(n)) for o, n in plan["renamed"].items() if ":" in o]
@@ -554,7 +574,6 @@ def public_api_problems(plan: dict, py, tb: dict, th: dict, public_api,
         for k, s in ah.items():
             if k not in ab:
                 new.setdefault(hp, {})[k] = s
-    problems = []
 
     def still_bound(path, name, home=None):
         if home is not None and path in th and star_import_from(th[path], path, home, roots):
@@ -981,12 +1000,13 @@ def caller_problems(plan: dict, callers: list[tuple], tb: dict, th: dict, roots)
 
 
 def caller_record(plan: dict, callers: list[tuple], tb: dict, th: dict, roots) -> tuple[list[str], dict]:
+    """tb, th: texts of the caller files and, for `adapted`, of the modules the plan's `changed` names."""
     return _callers(plan, callers, tb, th, roots)
 
 
 def _callers(plan, callers, tb, th, roots):
     renames, removed, changed, rem_m, chg_m, tops = _targets_map(plan, roots)
-    out, deleted, calls = [], [], 0
+    out, deleted, calls, adapts, seen = [], [], 0, [], set()
     for st, bp, hp in callers:
         if bp != hp or not bp or not hp:
             out.append(f"{hp or bp}: a caller file may not be added, deleted or renamed ({st})")
@@ -1004,13 +1024,56 @@ def _callers(plan, callers, tb, th, roots):
         except SyntaxError:
             out.append(f"{hp}: does not parse at base or head")
             continue
+        raw = adapted.raw_defs(plan, hp, (tb[bp], tbase), (th[hp], thead))   # before normalising
         nb = _Normalise(renames, tops).visit(tbase)
         nh = _Normalise({}, tops).visit(thead)
+        hit, more = _adapt_defs(raw, (nb, nh), plan, roots, (tb, th))
+        out, adapts, seen = out + hit, adapts + more, seen | set(raw)
         cb, ch = _ClearChanged(changed, chg_m), _ClearChanged(changed, chg_m)
         nb, nh = cb.visit(nb), ch.visit(nh)
         calls += ch.count
         out += _compare(nb.body, nh.body, removed, rem_m, hp, deleted)
-    return out, {"deleted": deleted, "changed_calls": calls, "files": len(callers)}
+    out += adapted.unseen(plan, seen)
+    return out, {"deleted": deleted, "changed_calls": calls, "files": len(callers), "adapted": adapts}
+
+
+def _adapt_defs(raw: dict, trees, plan, roots, texts) -> tuple[list[str], list[dict]]:
+    """Canonicalise each adapted def of one caller file in the normalised trees (see adapted.py);
+    `texts`: (base, head) texts that include the modules of the plan's changed names."""
+    entry_of = {}
+    for c in plan["changed"]:
+        p, n = _split(c)
+        d = _dotted(p, roots)
+        if d and n:
+            entry_of[f"{d}.{n}"] = c
+    out, record = [], []
+    for e, segs in raw.items():
+        hit, entry = _adapt(e, trees, segs, entry_of, texts)
+        out += hit
+        record += [entry] if entry else []
+    return out, record
+
+
+def _adapt(e, trees, segs, entry_of, texts) -> tuple[list[str], dict | None]:
+    head = f"plan adapted {e}:"
+    nb, nh = trees
+    q = adapted.split(e)[1]
+    fb, fh = adapted.find_defs(nb, q), adapted.find_defs(nh, q)
+    if len(fb) != 1 or len(fh) != 1:
+        return [f"{head} must be exactly one def at base and at head (found {len(fb)}, {len(fh)})"], None
+    fb, fh = fb[0], fh[0]
+    old, new = segs[0][0], segs[1][0]
+    if old == new:
+        return [f"{head} the def did not change"], None
+    names = set(q.split("."))
+    lk = adapted.links(nh, fh, names, set(entry_of), _TOK) & adapted.links(nb, fb, names, set(entry_of), _TOK)
+    if len(lk) != 1:
+        what = "no changed name" if not lk else f"{len(lk)} changed names ({', '.join(sorted(lk))})"
+        return [f"{head} linked to {what}: it must be patched over, or call, exactly one"], None
+    dotted = lk.pop()
+    lb, lh = (adapted.linked_params(entry_of[dotted], t) for t in texts)
+    adapted.canonicalise(fb, fh, lb, lh)
+    return [], {"name": e, "linked_to": entry_of[dotted], "old": old, "new": new}
 
 
 _FROM_IMPORT = re.compile(r"(?<![\w.])from[ \t]+([A-Za-z_][\w.]*)[ \t]+import[ \t]+"

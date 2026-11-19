@@ -222,7 +222,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import config, gitio
+from . import adapted, config, gitio
 from .compare import compare
 
 
@@ -491,7 +491,9 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         cp = interface.caller_paths(plan, changes, cfg, list(g.get("forbid", [])))
         cb = gitio.read_files(repo, base, sorted({bp for _, bp, _ in cp if bp}))
         ch = gitio.read_files(repo, None, sorted({hp for _, _, hp in cp if hp}))
-        hit, rec = interface.caller_record(plan, cp, cb, ch, (cfg.architecture or {}).get("roots", ["src", "."]))
+        mb, mh = adapted.module_texts(repo, base, plan)          # what `adapted` defs follow
+        hit, rec = interface.caller_record(plan, cp, {**mb, **cb}, {**mh, **ch},
+                                           (cfg.architecture or {}).get("roots", ["src", "."]))
         summary = (f"{len(cp)} caller file(s) follow the plan; {len(rec['deleted'])} statement(s) deleted"
                    f"{' (' + '; '.join(rec['deleted'][:3]) + ')' if rec['deleted'] else ''}; "
                    f"{rec['changed_calls']} changed call(s)")
@@ -524,6 +526,7 @@ def static_checks(repo: Path, base: str, cfg: config.Config, changes, trial: boo
         lb, lh = sum(per_b.values(), Counter()), sum(per_h.values(), Counter())
         if iface:                                  # __all__ of the plan's files: left to public_api
             lb, lh = lb - interface.all_strings(plan, tb), lh - interface.all_strings(plan, th)
+            lb, lh = lb - adapted.literals(plan, tb, _string_literals), lh - adapted.literals(plan, th, _string_literals)
         gone, new = lb - lh, lh - lb
         declared = iface and (plan.get("literals_added") or plan.get("literals_removed"))
         if declared:                               # interface plan: exactly the declared literals

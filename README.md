@@ -556,10 +556,11 @@ reason = "ADR 0076: drop the compatibility re-exports of pkg.api"
 removed = ["src/pkg/api.py:old_solve", "src/pkg/compat.py"]     # path:Name, or a whole module
 renamed = {"src/pkg/a.py:Solver" = "src/pkg/core/solver.py:Solver", "src/pkg/b.py" = "src/pkg/core/b.py"}
 retargeted = {"src/pkg/api.py:Solver" = "src/pkg/core/solver.py:Solver"}   # re-export dropped, callers go home
-changed = ["src/pkg/run.py:run"]                                 # same name and module, new signature
+changed = ["src/pkg/run.py:run", "src/pkg/run.py:_step"]        # same name and module, new signature
 added = ["src/pkg/core/solver.py:make_solver"]                   # new names that are not renames
 new_files = ["src/pkg/core/*.py"]
 callers = ["tests/**", "docs/examples/**"]                       # files that follow the change
+adapted = ["tests/test_run.py:test_x.fake"]                      # caller defs that follow a signature
 
 [[literals_added]]                                               # deliberate new string literals
 file = "src/pkg/core/region.py"
@@ -584,7 +585,11 @@ in refactor mode, except:
   difference fails, and `__all__` may change only by the names the plan lists for that file.
   `added = ["f.py:__all__"]` gives an existing module an `__all__` (a literal list of names bound in
   f.py at head; a new public name in it still needs its own `added` entry); `removed` takes it away.
-  A listed change the step did not make fails. The check's JSON entry carries `interface`:
+  A listed change the step did not make fails. A private `changed` name (`f.py:_step`,
+  `f.py:Cls._m`; not a private class) is checked on its def instead: one def at base and at head
+  in that module, with a different signature (decorators, parameters, return annotation); calls
+  to it in caller files may then take other arguments, as for a public name. A nested def is
+  refused. The check's JSON entry carries `interface`:
   the old and new API text of each planned change, for review.
   With `[gate] no_implicit_reexport = true` (needs `public_api = true`), the old module of a rename or retarget may keep a plain `from <new home> import N` that its
   own code reads: not a re-export under PEP 484. It still counts as a shim in an `__init__.py`,
@@ -627,6 +632,26 @@ in refactor mode, except:
   targets, and its line count and comments must match. The check's JSON entry `callers` lists every deleted statement and the number of
   changed calls. Not supported (rejected, rewrite by hand outside the gate): deleting a helper
   together with a removed test, star imports that hide a renamed name.
+- `adapted` (needs `changed`): defs in caller files, `path.py:qualname` (`test_x.fake` for a def
+  nested in `test_x`), whose parameters had to follow a changed signature: fakes, spies and
+  pass-through wrappers. Each must be one def at base and at head, must change, and must be
+  linked to exactly one changed name: its name (or an enclosing def's) occurs in one statement
+  with that name's target (`monkeypatch.setattr(mod, "_f", fake)`, `setattr`, `mock.patch(...,
+  new=fake)`, an assignment), or its body calls it. Its parameters may change; its body must equal
+  the base body once the inputs are read alike on both sides: a parameter `k`, `kw["k"]` and
+  `kw.get("k")` for the `**` parameter, `a[i]` for the `*` parameter as the linked function's i-th
+  base parameter; at head also `b.k` and `a[j].k` where b, or the linked function's j-th head
+  parameter, is new (a bundle such as a context object); a call forwarding every input unchanged
+  (`f(**kw)`, `f(*a, **kw)`, `f(call)`) is the same call. So a fake may read `call.warm_start`
+  where it read `kwargs["warm_start"]`, but a changed condition, return value or field fails
+  ("replace beyond the plan"; bundle fields keep the old keyword names). A new fake parameter is
+  a bundle only at a new parameter position or name of the linked function; a forwarding call
+  passes the positional inputs in order, then `*a`, each keyword once; a nested lambda, def or
+  comprehension that rebinds an input name is compared as written. Conservative failures:
+  `kw.get("k", default)`, and a parameter named like an import of the file. The `callers` JSON entry
+  lists each adapted def with its linked name and old and new text, for review. String literals
+  inside adapted defs are left to this check (a forbidden, in-scope test that stops reading
+  `kwargs["warm_start"]` does not fail `literals`).
 - `literals`: the `__all__` elements of the files the plan names are left to `public_api`.
 `codehealth log` records class `interface`; accepted needs all checks ok and needs no debt drop
 (debt may still not rise). With `[docs] docstrings = true`, a renamed undocumented name counts
