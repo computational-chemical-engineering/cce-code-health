@@ -108,6 +108,9 @@ Suppress a smell for one function with a comment on the line above it or on its 
 line; the reason is mandatory and every new suppression is listed by `diff`:
 `# codehealth: allow params -- public API, kept for compatibility`.
 File-level smells use `allow-file`.
+A Python file with a SyntaxWarning (an invalid escape such as `"\p"`) is still scored; every
+command prints one `codehealth: note: <path>:<line>: ...` line per warning instead of Python's
+`<unknown>:<line>` warning per parse.
 
 ### Profile python@1
 

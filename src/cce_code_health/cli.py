@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fcntl
 import importlib.metadata
 import json
 import re
 import sys
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +23,28 @@ from .python_backend import analyze
 from .report import file_report
 
 EPS = 1e-9
+_NOTED: set = set()     # (path, line, message) of SyntaxWarnings already noted in this run
+
+
+def _syntax_notes(texts: dict[str, str]) -> None:
+    """One stderr line per SyntaxWarning (e.g. an invalid escape) in a Python file, naming the
+    file, once per run. Every other parse runs with SyntaxWarning ignored (main), which would
+    otherwise print `<unknown>:LINE` once per parse site and ref."""
+    for path, text in texts.items():
+        if not path.endswith((".py", ".pyi")):
+            continue
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", SyntaxWarning)
+            try:
+                compile(text, path, "exec", ast.PyCF_ONLY_AST)
+            except (SyntaxError, ValueError):
+                continue
+        for w in caught:
+            key = (path, w.lineno, str(w.message))
+            if issubclass(w.category, SyntaxWarning) and key not in _NOTED:
+                _NOTED.add(key)
+                print(f"codehealth: note: {path}:{w.lineno}: {w.message} (SyntaxWarning; "
+                      "the file is still scored)", file=sys.stderr)
 
 
 def _load(a, repo: Path, ref: str | None) -> config.Config:
@@ -37,6 +61,7 @@ def analyze_ref(repo: Path, ref: str | None, cfg: config.Config,
     of each language. The backend follows the file's profile (config.EXTENSIONS)."""
     files = [p for p in gitio.ls_files(repo, ref) if cfg.in_scope(p)]
     texts = gitio.read_files(repo, ref, files)
+    _syntax_notes(texts)
     dup: dict[str, int] = {}
     for p in [cfg.profile, *cfg.other_profiles.values()]:
         group = {k: v for k, v in texts.items() if cfg.profile_for(k) is p}
@@ -901,8 +926,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["gate"].add_argument("--require-gain", action="store_true",
                                      help="add a static check `gain`: debt over touched files must drop")
     a = ap.parse_args(argv)
+    _NOTED.clear()
     try:
-        return a.fn(a)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            return a.fn(a)
     except (gitio.GitError, ValueError, OSError, RuntimeError, KeyError) as exc:
         print(f"codehealth: error: {exc}", file=sys.stderr)
         return 2
