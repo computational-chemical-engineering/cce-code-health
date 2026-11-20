@@ -10,7 +10,7 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
 
 ## Position (2026-11-19)
 
-- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 569 tests. Since v0.4.0 on main: brain-multiset (PR #1), bench exact wall time + even repeat (2847f98), bench `cache = "warm"` (9d30abf), --json usage check, interface private `changed` + `adapted` caller defs (34a30bf, src/cce_code_health/adapted.py), flaky timing bound dropped (ae392aa).
+- Tagged v0.4.0 2026-11-18 at 6f5bc28 (plugin 0.4.0; python@1 frozen). v0.3.0 at a2c3829 (cpp@1 frozen, zones). 571 tests (6f96b54). Since v0.4.0 on main: brain-multiset (PR #1), bench exact wall time + even repeat (2847f98), bench `cache = "warm"` (9d30abf), --json usage check, interface private `changed` + `adapted` caller defs (34a30bf, src/cce_code_health/adapted.py), flaky timing bound dropped (ae392aa).
 - Work is reactive: adopter sessions report tool issues; each fix is committed, pushed to
   main, the commit id sent back, and one line appended to docs/STATE_LOG.md.
 - Adopters and where they stand:
@@ -28,6 +28,9 @@ Public repo computational-chemical-engineering/cce-code-health (MIT, 0.x), main.
     module_nloc share), TR09 executable. Will send (a) weak-model refactor-step trial brief and
     results (t9 recorded 114b31a, t10 weak gate recorded in seed playbook + py1 design: tuple bags,
     silent behaviour changes), then (b) arms none / short rules / rules + scan feedback. Fold findings into the playbook.
+  - pymrm-gallery (new 2026-11-20, branch tooling/codehealth, worktree
+    ~/Code/pymrm_suite/worktrees/gallery-codehealth; python@1, scope model.py/test_model.py/scripts/shared,
+    no [gate]): SyntaxWarning note fixed 6f96b54; advised per-function `allow params -- reason`. Nothing open.
   - pymrm c3: class-state cross-object read is a known blind spot, python@2 candidate (docs/py1/design.md section 3).
 
 ## Next action
